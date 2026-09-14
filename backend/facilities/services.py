@@ -11,6 +11,35 @@ OVERPASS_API_URL = os.environ.get("OVERPASS_API_URL", "https://overpass-api.de/a
 # Cache timeout in seconds (e.g. 10 minutes)
 CACHE_TTL = int(os.environ.get("FACILITIES_CACHE_TTL", "600"))
 
+# Radius (meters) searched around each city's center point.
+CITY_SEARCH_RADIUS_METERS = int(os.environ.get("CITY_SEARCH_RADIUS_METERS", "12000"))
+
+# Overpass requires a descriptive User-Agent; public instances 406-reject
+# requests carrying a generic client User-Agent (e.g. python-requests/...).
+OVERPASS_USER_AGENT = os.environ.get(
+    "OVERPASS_USER_AGENT", "AccessibleKPK/1.0 (+https://github.com/shahmeerabdul/accessible-kp)"
+)
+
+# City center coordinates (lat, lon). OSM's administrative boundaries for
+# these cities are tagged with local-script names (Urdu/Pashto) under `name`,
+# with the English name -- when present -- often under `name:en` and not an
+# exact match (e.g. "Peshawar City Tehsil"). Matching on `area["name"=city]`
+# therefore never resolves and silently returns zero results. Searching by
+# radius around a known point sidesteps that tagging inconsistency entirely.
+CITY_COORDINATES: Dict[str, tuple[float, float]] = {
+    "peshawar": (34.0151, 71.5249),
+    "mardan": (34.1986, 72.0404),
+    "abbottabad": (34.1463, 73.2117),
+    "mingora": (34.7717, 72.3604),
+    "swat": (34.7717, 72.3604),
+    "kohat": (33.5900, 71.4400),
+    "bannu": (32.9853, 70.6027),
+    "dera ismail khan": (31.8313, 70.9022),
+    "charsadda": (34.1520, 71.7380),
+    "nowshera": (34.0158, 71.9761),
+    "haripur": (33.9964, 72.9337),
+    "mansehra": (34.3329, 73.1997),
+}
 
 SUPPORTED_CITIES = [
     "Peshawar",
@@ -34,31 +63,35 @@ def is_supported_city(city: str) -> bool:
     return city.strip().lower() in SUPPORTED_CITIES_LOWER
 
 
+def get_city_center(city: str) -> tuple[float, float] | None:
+    return CITY_COORDINATES.get(city.strip().lower())
+
+
 class OverpassError(Exception):
     """Custom exception for Overpass-related issues."""
 
 
 def build_overpass_query(city: str, limit: int | None = None) -> str:
     """
-    Build an Overpass QL query to fetch healthcare facilities in the given city.
-
-    We search for typical healthcare-related tags within the administrative area
-    boundary matching the city name.
+    Build an Overpass QL query to fetch healthcare facilities near the given
+    city's center point.
     """
-    # Basic safety: escape double quotes
-    city_escaped = city.replace('"', '\\"')
+    center = get_city_center(city)
+    if center is None:
+        raise OverpassError(f"No known coordinates for city '{city}'")
+    lat, lon = center
+    radius = CITY_SEARCH_RADIUS_METERS
 
     core = f"""
     [out:json][timeout:25];
-    area["name"="{city_escaped}"]["boundary"="administrative"]["admin_level"~"6|7|8"]->.searchArea;
     (
-      node["amenity"~"hospital|clinic|doctors"](area.searchArea);
-      way["amenity"~"hospital|clinic|doctors"](area.searchArea);
-      relation["amenity"~"hospital|clinic|doctors"](area.searchArea);
+      node["amenity"~"hospital|clinic|doctors"](around:{radius},{lat},{lon});
+      way["amenity"~"hospital|clinic|doctors"](around:{radius},{lat},{lon});
+      relation["amenity"~"hospital|clinic|doctors"](around:{radius},{lat},{lon});
 
-      node["healthcare"~"hospital|clinic|centre"](area.searchArea);
-      way["healthcare"~"hospital|clinic|centre"](area.searchArea);
-      relation["healthcare"~"hospital|clinic|centre"](area.searchArea);
+      node["healthcare"~"hospital|clinic|centre"](around:{radius},{lat},{lon});
+      way["healthcare"~"hospital|clinic|centre"](around:{radius},{lat},{lon});
+      relation["healthcare"~"hospital|clinic|centre"](around:{radius},{lat},{lon});
     );
     """
 
@@ -178,6 +211,7 @@ def fetch_facilities_from_overpass(city: str, limit: int | None = None) -> List[
         response = requests.post(
             OVERPASS_API_URL,
             data={"data": query},
+            headers={"User-Agent": OVERPASS_USER_AGENT},
             timeout=30,
         )
     except requests.RequestException as exc:

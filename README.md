@@ -54,6 +54,8 @@ Data is fetched live from **OpenStreetMap** using the **Overpass API**, via a Dj
    - `DJANGO_ALLOWED_HOSTS` – usually `*` for local dev
    - `CORS_ALLOWED_ORIGINS` – frontend origin, e.g. `http://localhost:5173`
    - `OVERPASS_API_URL` – Overpass endpoint (`https://overpass-api.de/api/interpreter` by default)
+   - `OVERPASS_USER_AGENT` – identifies this app to Overpass; public instances 406-reject requests with a generic client User-Agent
+   - `CITY_SEARCH_RADIUS_METERS` – radius (meters) searched around each city's center point (default `12000`)
    - `FACILITIES_CACHE_TTL` – cache duration (seconds) for city results
 
 4. **Run migrations**
@@ -143,7 +145,10 @@ The root `App` component:
 ### Backend architecture (Django + Overpass)
 
 - **`facilities/services.py`**
-  - Constructs Overpass QL queries for a given city
+  - Constructs an Overpass QL query searching within `CITY_SEARCH_RADIUS_METERS` of each
+    supported city's known center coordinates (`CITY_COORDINATES`) — not an OSM administrative
+    boundary lookup, since these boundaries are tagged with local-script (Urdu/Pashto) names in
+    OSM and don't reliably match an English city name
   - Calls the Overpass API (endpoint configurable via `OVERPASS_API_URL`)
   - Normalises each OSM element into a facility object:
     - `osm_id`, `name`, `facility_type` (`Hospital`, `Clinic`, `BHU`, `RHC`, etc.)
