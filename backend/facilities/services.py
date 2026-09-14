@@ -186,7 +186,11 @@ def fetch_facilities_from_overpass(city: str, limit: int | None = None) -> List[
     if response.status_code != 200:
         raise OverpassError(f"Overpass API returned status {response.status_code}")
 
-    data = response.json()
+    try:
+        data = response.json()
+    except ValueError as exc:
+        raise OverpassError("Overpass API returned an invalid response") from exc
+
     elements = data.get("elements", [])
 
     facilities: List[Dict[str, Any]] = []
