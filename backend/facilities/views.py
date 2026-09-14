@@ -35,7 +35,7 @@ class FacilityListView(APIView):
             )
 
         limit_param = request.query_params.get("limit")
-        limit: int | None = None
+        limit: int = MAX_LIMIT
         if limit_param:
             try:
                 limit = min(MAX_LIMIT, max(1, int(limit_param)))
