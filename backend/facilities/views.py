@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .serializers import FacilitySerializer
-from .services import OverpassError, get_facilities_by_city, is_supported_city
+from .services import FacilityProviderError, get_facilities_by_city, is_supported_city
 
 MAX_LIMIT = 500
 
@@ -47,7 +47,7 @@ class FacilityListView(APIView):
 
         try:
             facilities_data: List[dict] = get_facilities_by_city(city, limit)
-        except OverpassError as exc:
+        except FacilityProviderError as exc:
             return Response(
                 {"detail": str(exc)},
                 status=status.HTTP_502_BAD_GATEWAY,
