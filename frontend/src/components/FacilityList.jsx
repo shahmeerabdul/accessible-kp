@@ -1,97 +1,171 @@
-function OwnershipBadge({ ownership }) {
-  if (!ownership) return null;
-  const isGov = ownership === "government";
-  const color = isGov ? "bg-emerald-500/10 text-emerald-300 border-emerald-500/40" : "bg-sky-500/10 text-sky-300 border-sky-500/40";
-  const label = isGov ? "Government" : "Private";
+import { styleForType } from "../lib/facilityStyle.js";
 
+function Badge({ className, children }) {
   return (
-    <span className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide ${color}`}>
-      {label}
-    </span>
-  );
-}
-
-function Tag({ children }) {
-  return (
-    <span className="inline-flex items-center rounded-full bg-slate-800/80 px-2 py-0.5 text-[10px] font-medium uppercase tracking-wide text-slate-200">
+    <span
+      className={`inline-flex items-center rounded-full border px-2 py-0.5 text-[10px] font-semibold uppercase tracking-wide ${className}`}
+    >
       {children}
     </span>
   );
 }
 
-export function FacilityList({ facilities, loading, error, selectedCity }) {
-  if (!selectedCity) {
-    return (
-      <div className="flex h-full items-center justify-center rounded-xl border border-dashed border-slate-800 bg-slate-950/50 p-6 text-center text-sm text-slate-400">
-        Select a city in KPK to explore nearby healthcare facilities.
-      </div>
-    );
-  }
-
-  if (loading) {
-    return (
-      <div className="flex h-full items-center justify-center rounded-xl border border-slate-800 bg-slate-950/50 p-6 text-sm text-slate-300">
-        Fetching live data from OpenStreetMap for {selectedCity}…
-      </div>
-    );
-  }
-
-  if (error) {
-    return (
-      <div className="rounded-xl border border-red-500/40 bg-red-950/40 p-4 text-sm text-red-100">
-        <p className="font-semibold">Unable to load facilities.</p>
-        <p className="mt-1 text-xs opacity-80">
-          {error || "There was a problem communicating with the backend or Overpass API."}
-        </p>
-      </div>
-    );
-  }
-
-  if (!facilities || facilities.length === 0) {
-    return (
-      <div className="flex h-full items-center justify-center rounded-xl border border-slate-800 bg-slate-950/50 p-6 text-center text-sm text-slate-400">
-        No healthcare facilities were found in OpenStreetMap for {selectedCity}. Data coverage may be incomplete.
-      </div>
-    );
-  }
-
+function EmptyState({ icon, title, hint, tone = "slate" }) {
+  const tones = {
+    slate: "border-slate-800 bg-slate-950/40 text-slate-400",
+    danger: "border-red-500/40 bg-red-950/30 text-red-200",
+  };
   return (
-    <div className="space-y-2 overflow-y-auto rounded-xl border border-slate-800 bg-slate-950/60 p-3">
-      <div className="flex items-center justify-between text-xs text-slate-400">
-        <span>
-          Showing <span className="font-semibold text-slate-200">{facilities.length}</span> facilities in{" "}
-          <span className="font-semibold text-slate-200">{selectedCity}</span>
-        </span>
-        <span>Source: OpenStreetMap (via Overpass API)</span>
-      </div>
-      <ul className="mt-1 space-y-2">
-        {facilities.map((f) => (
-          <li
-            key={f.osm_id}
-            className="rounded-lg border border-slate-800 bg-slate-900/80 p-3 text-xs hover:border-brand-500/60 hover:bg-slate-900"
-          >
-            <div className="flex items-start justify-between gap-2">
-              <div>
-                <h3 className="text-sm font-semibold text-slate-100">
-                  {f.name || "Unnamed facility"}
-                </h3>
-                <p className="mt-0.5 text-[11px] text-slate-400">{f.address || "Address not available"}</p>
-              </div>
-              <div className="flex flex-col items-end gap-1">
-                {f.facility_type && <Tag>{f.facility_type}</Tag>}
-                <OwnershipBadge ownership={f.ownership} />
-              </div>
-            </div>
-
-            <div className="mt-2 flex flex-wrap items-center gap-2">
-              {f.phone && <Tag>Phone: {f.phone}</Tag>}
-              {f.is_emergency && <Tag>Emergency</Tag>}
-              {f.is_24_7 && <Tag>24/7</Tag>}
-            </div>
-          </li>
-        ))}
-      </ul>
+    <div
+      className={`flex flex-1 flex-col items-center justify-center gap-2 rounded-xl border border-dashed p-6 text-center ${tones[tone]}`}
+    >
+      <div className="text-2xl opacity-80">{icon}</div>
+      <p className="text-sm font-medium">{title}</p>
+      {hint && <p className="max-w-xs text-xs opacity-75">{hint}</p>}
     </div>
   );
 }
 
+function Skeleton() {
+  return (
+    <div className="space-y-2">
+      {[0, 1, 2, 3, 4].map((i) => (
+        <div
+          key={i}
+          className="animate-pulse rounded-lg border border-slate-800 bg-slate-900/60 p-3"
+        >
+          <div className="mb-2 h-3.5 w-2/3 rounded bg-slate-700/60" />
+          <div className="h-2.5 w-1/3 rounded bg-slate-800" />
+        </div>
+      ))}
+    </div>
+  );
+}
+
+export function FacilityList({
+  facilities,
+  loading,
+  error,
+  selectedCity,
+  selectedId,
+  onSelect,
+}) {
+  if (!selectedCity) {
+    return (
+      <EmptyState
+        icon="🗺️"
+        title="Pick a city to begin"
+        hint="Choose a KPK city above to discover hospitals, clinics, BHUs and RHCs nearby."
+      />
+    );
+  }
+
+  if (loading) return <Skeleton />;
+
+  if (error) {
+    return (
+      <EmptyState
+        icon="⚠️"
+        tone="danger"
+        title="Couldn't load facilities"
+        hint={error}
+      />
+    );
+  }
+
+  if (!facilities.length) {
+    return (
+      <EmptyState
+        icon="🔍"
+        title={`No matches in ${selectedCity}`}
+        hint="Try clearing the filters — OpenStreetMap coverage for this area may be incomplete."
+      />
+    );
+  }
+
+  return (
+    <ul className="space-y-2">
+      {facilities.map((f) => {
+        const style = styleForType(f.facility_type);
+        const isSelected = selectedId === f.osm_id;
+        return (
+          <li key={f.osm_id}>
+            <button
+              type="button"
+              onClick={() => onSelect(isSelected ? null : f.osm_id)}
+              className={`w-full rounded-lg border px-2.5 py-2 text-left transition ${
+                isSelected
+                  ? "border-brand-500/70 bg-brand-500/10 shadow-sm shadow-brand-500/20"
+                  : "border-slate-800 bg-slate-900/70 hover:border-slate-700 hover:bg-slate-900"
+              }`}
+            >
+              <div className="flex items-start gap-2.5">
+                <span
+                  className={`mt-1.5 h-2 w-2 shrink-0 rounded-full ${style.dot}`}
+                  aria-hidden="true"
+                />
+                <div className="min-w-0 flex-1">
+                  <h3 className="truncate text-sm font-semibold text-slate-100">
+                    {f.name || "Unnamed facility"}
+                  </h3>
+                  {f.address && (
+                    <p className="mt-0.5 truncate text-[11px] text-slate-400">
+                      {f.address}
+                    </p>
+                  )}
+
+                  <div className="mt-1.5 flex flex-wrap items-center gap-1.5">
+                    {f.facility_type && (
+                      <Badge className={style.badge}>{f.facility_type}</Badge>
+                    )}
+                    {f.ownership && (
+                      <Badge
+                        className={
+                          f.ownership === "government"
+                            ? "border-emerald-500/40 bg-emerald-500/10 text-emerald-200"
+                            : "border-indigo-500/40 bg-indigo-500/10 text-indigo-200"
+                        }
+                      >
+                        {f.ownership === "government" ? "Govt" : "Private"}
+                      </Badge>
+                    )}
+                    {f.is_emergency && (
+                      <Badge className="border-red-500/40 bg-red-500/10 text-red-200">
+                        Emergency
+                      </Badge>
+                    )}
+                    {f.is_24_7 && (
+                      <Badge className="border-teal-500/40 bg-teal-500/10 text-teal-200">
+                        24/7
+                      </Badge>
+                    )}
+                  </div>
+
+                  {f.phone && (
+                    <a
+                      href={`tel:${f.phone}`}
+                      onClick={(e) => e.stopPropagation()}
+                      className="mt-2 inline-flex items-center gap-1 text-[11px] font-medium text-brand-300 hover:text-brand-200 hover:underline"
+                    >
+                      <svg
+                        className="h-3 w-3"
+                        viewBox="0 0 24 24"
+                        fill="none"
+                        stroke="currentColor"
+                        strokeWidth="2"
+                        aria-hidden="true"
+                      >
+                        <path d="M22 16.9v3a2 2 0 0 1-2.2 2 19.8 19.8 0 0 1-8.6-3.1 19.5 19.5 0 0 1-6-6A19.8 19.8 0 0 1 2.1 4.2 2 2 0 0 1 4.1 2h3a2 2 0 0 1 2 1.7c.1 1 .3 1.9.6 2.8a2 2 0 0 1-.5 2.1L8.1 9.9a16 16 0 0 0 6 6l1.3-1.1a2 2 0 0 1 2.1-.5c.9.3 1.8.5 2.8.6a2 2 0 0 1 1.7 2Z" />
+                      </svg>
+                      {f.phone}
+                    </a>
+                  )}
+                </div>
+              </div>
+            </button>
+          </li>
+        );
+      })}
+    </ul>
+  );
+}

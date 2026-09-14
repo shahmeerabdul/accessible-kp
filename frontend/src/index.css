@@ -2,16 +2,70 @@
 @tailwind components;
 @tailwind utilities;
 
-body {
-  @apply bg-slate-950 text-slate-100 antialiased;
+html,
+body,
+#root {
+  height: 100%;
 }
 
-#root {
-  @apply min-h-screen;
+body {
+  @apply bg-slate-950 text-slate-100 antialiased;
 }
 
 .leaflet-container {
   width: 100%;
   height: 100%;
+  background: #0f172a;
 }
 
+/* Dark popups so the map matches the rest of the UI */
+.leaflet-popup-content-wrapper,
+.leaflet-popup-tip {
+  @apply border border-slate-700 bg-slate-900 text-slate-100;
+}
+
+.leaflet-popup-content-wrapper {
+  @apply rounded-lg shadow-xl;
+}
+
+.leaflet-popup-content {
+  margin: 10px 12px;
+}
+
+.leaflet-container a.leaflet-popup-close-button {
+  @apply text-slate-400 hover:text-slate-100;
+}
+
+.leaflet-control-zoom a {
+  @apply border-slate-700 bg-slate-900 text-slate-200 hover:bg-slate-800;
+}
+
+.leaflet-control-attribution {
+  @apply rounded-tl-md border-l border-t border-slate-700/60 text-slate-400 backdrop-blur;
+  background: rgba(2, 6, 23, 0.85) !important;
+  font-size: 10px !important;
+  padding: 2px 6px !important;
+}
+
+.leaflet-control-attribution a {
+  @apply text-slate-300;
+}
+
+/* Leaflet injects a Ukraine flag span that clashes with the dark chrome */
+.leaflet-attribution-flag {
+  display: none !important;
+}
+
+/* Slim scrollbar for the results panel */
+.overflow-y-auto::-webkit-scrollbar {
+  width: 6px;
+}
+.overflow-y-auto::-webkit-scrollbar-thumb {
+  @apply rounded-full bg-slate-700;
+}
+.overflow-y-auto::-webkit-scrollbar-thumb:hover {
+  @apply bg-slate-600;
+}
+.overflow-y-auto::-webkit-scrollbar-track {
+  background: transparent;
+}

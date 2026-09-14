@@ -7,6 +7,17 @@ import { fetchFacilities } from "./api/client.js";
 
 const DEFAULT_LIMIT = 150;
 
+function Stat({ label, value, accent }) {
+  return (
+    <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1.5 text-center">
+      <div className={`text-base font-semibold leading-none ${accent}`}>{value}</div>
+      <div className="mt-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
+        {label}
+      </div>
+    </div>
+  );
+}
+
 export default function App() {
   const [city, setCity] = useState("");
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
@@ -17,6 +28,7 @@ export default function App() {
   const [ownership, setOwnership] = useState("");
   const [emergencyOnly, setEmergencyOnly] = useState(false);
   const [open24, setOpen24] = useState(false);
+  const [selectedId, setSelectedId] = useState(null);
 
   useEffect(() => {
     if (!city) {
@@ -28,27 +40,24 @@ export default function App() {
     let cancelled = false;
     setLoading(true);
     setError("");
+    setSelectedId(null);
 
     fetchFacilities({ city, limit })
       .then((data) => {
-        if (!cancelled) {
-          setFacilities(Array.isArray(data) ? data : []);
-        }
+        if (!cancelled) setFacilities(Array.isArray(data) ? data : []);
       })
       .catch((err) => {
         if (!cancelled) {
           console.error(err);
           setError(
             err?.response?.data?.detail ||
-              "Could not load facilities. Please check that the Django backend is running."
+              "Could not load facilities. Check that the Django backend is running."
           );
           setFacilities([]);
         }
       })
       .finally(() => {
-        if (!cancelled) {
-          setLoading(false);
-        }
+        if (!cancelled) setLoading(false);
       });
 
     return () => {
@@ -56,34 +65,53 @@ export default function App() {
     };
   }, [city, limit]);
 
-  const filteredFacilities = useMemo(() => {
-    return facilities.filter((f) => {
-      if (ownership && f.ownership !== ownership) return false;
-      if (emergencyOnly && !f.is_emergency) return false;
-      if (open24 && !f.is_24_7) return false;
-      return true;
-    });
-  }, [facilities, ownership, emergencyOnly, open24]);
+  const filteredFacilities = useMemo(
+    () =>
+      facilities.filter((f) => {
+        if (ownership && f.ownership !== ownership) return false;
+        if (emergencyOnly && !f.is_emergency) return false;
+        if (open24 && !f.is_24_7) return false;
+        return true;
+      }),
+    [facilities, ownership, emergencyOnly, open24]
+  );
+
+  const stats = useMemo(() => {
+    const counts = { total: filteredFacilities.length, hospitals: 0, emergency: 0 };
+    for (const f of filteredFacilities) {
+      if (f.facility_type === "Hospital") counts.hospitals += 1;
+      if (f.is_emergency) counts.emergency += 1;
+    }
+    return counts;
+  }, [filteredFacilities]);
 
   return (
-    <div className="mx-auto flex min-h-screen max-w-6xl flex-col gap-4 px-4 py-4 md:px-6 md:py-6">
-      <header className="space-y-2">
-        <h1 className="text-xl font-semibold tracking-tight text-slate-50 md:text-2xl">
-          Accessible KPK – Healthcare Facility Finder
-        </h1>
-        <p className="max-w-3xl text-xs text-slate-300 md:text-sm">
-          A lightweight discovery tool for hospitals, clinics, Basic Health Units (BHUs) and Rural Health
-          Centers (RHCs) across Khyber Pakhtunkhwa (KPK), Pakistan. Data is sourced from{" "}
-          <span className="font-semibold text-slate-100">OpenStreetMap</span> and filtered for healthcare
-          facilities only.
-        </p>
+    <div className="flex min-h-screen flex-col bg-slate-950 md:h-screen md:overflow-hidden">
+      <header className="shrink-0 border-b border-slate-800/80 bg-slate-950/80 px-4 py-3 backdrop-blur md:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-2">
+          <div className="flex items-center gap-2.5">
+            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/15 text-base ring-1 ring-brand-500/30">
+              🏥
+            </span>
+            <div>
+              <h1 className="text-sm font-semibold tracking-tight text-slate-50 md:text-base">
+                Accessible KPK
+              </h1>
+              <p className="text-[11px] text-slate-400">
+                Healthcare facility finder · Khyber Pakhtunkhwa
+              </p>
+            </div>
+          </div>
+          <span className="rounded-full border border-slate-700/70 bg-slate-900/70 px-2.5 py-1 text-[10px] font-medium text-slate-400">
+            Live data · OpenStreetMap
+          </span>
+        </div>
       </header>
 
-      <section className="grid gap-4 rounded-2xl border border-slate-800 bg-slate-900/60 p-4 shadow-xl shadow-black/40 md:grid-cols-[minmax(0,3fr)_minmax(0,4fr)] md:gap-5 md:p-5">
-        <div className="flex flex-col gap-4">
-          <CitySelect value={city} onChange={setCity} />
-
-          <div className="flex flex-col gap-2 text-xs text-slate-300 md:flex-row md:items-center md:justify-between">
+      <main className="grid flex-1 gap-3 p-3 md:min-h-0 md:grid-cols-[340px_minmax(0,1fr)] md:gap-4 md:p-4">
+        <aside className="flex min-w-0 flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/50 p-3 md:min-h-0 md:overflow-hidden">
+          <div className="shrink-0 space-y-3">
+            <CitySelect value={city} onChange={setCity} />
             <Filters
               ownership={ownership}
               setOwnership={setOwnership}
@@ -91,45 +119,41 @@ export default function App() {
               setEmergencyOnly={setEmergencyOnly}
               open24={open24}
               setOpen24={setOpen24}
+              limit={limit}
+              setLimit={setLimit}
             />
 
-            <div className="flex items-center gap-2 md:self-start">
-              <label className="text-xs text-slate-300" htmlFor="limit">
-                Max results
-              </label>
-              <select
-                id="limit"
-                value={limit}
-                onChange={(e) => setLimit(Number(e.target.value))}
-                className="rounded-md border border-slate-700 bg-slate-950 px-2 py-1 text-xs text-slate-100 shadow-sm outline-none focus:border-brand-500 focus:ring-1 focus:ring-brand-500"
-              >
-                {[50, 100, 150, 200].map((v) => (
-                  <option key={v} value={v}>
-                    {v}
-                  </option>
-                ))}
-              </select>
-            </div>
+            {city && !loading && !error && facilities.length > 0 && (
+              <div className="grid grid-cols-3 gap-1.5">
+                <Stat label="Results" value={stats.total} accent="text-slate-100" />
+                <Stat label="Hospitals" value={stats.hospitals} accent="text-rose-300" />
+                <Stat label="Emergency" value={stats.emergency} accent="text-amber-300" />
+              </div>
+            )}
+
+            <div className="h-px bg-slate-800" />
           </div>
 
-          <FacilityList
+          <div className="flex min-w-0 flex-col md:min-h-0 md:flex-1 md:overflow-y-auto md:pr-0.5">
+            <FacilityList
+              facilities={filteredFacilities}
+              loading={loading}
+              error={error}
+              selectedCity={city}
+              selectedId={selectedId}
+              onSelect={setSelectedId}
+            />
+          </div>
+        </aside>
+
+        <section className="h-[55vh] min-w-0 md:h-auto md:min-h-0">
+          <MapView
             facilities={filteredFacilities}
-            loading={loading}
-            error={error}
-            selectedCity={city}
+            selectedId={selectedId}
+            onSelect={setSelectedId}
           />
-        </div>
-
-        <MapView facilities={filteredFacilities} />
-      </section>
-
-      <footer className="mt-auto border-t border-slate-800 pt-3 text-[11px] text-slate-500">
-        <p>
-          This is a semester project demo. Coverage depends on what is mapped in OpenStreetMap and may be
-          incomplete or outdated. Always verify information directly with facilities.
-        </p>
-      </footer>
+        </section>
+      </main>
     </div>
   );
 }
-
