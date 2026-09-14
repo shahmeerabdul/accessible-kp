@@ -175,6 +175,14 @@ def infer_is_emergency(tags: Dict[str, Any]) -> bool | None:
     return None
 
 
+def build_phone(tags: Dict[str, Any]) -> str:
+    for key in ("phone", "contact:phone", "contact:mobile", "phone:mobile", "mobile"):
+        value = tags.get(key)
+        if value:
+            return str(value)
+    return ""
+
+
 def build_address(tags: Dict[str, Any]) -> str:
     parts = [
         tags.get("addr:housename"),
@@ -204,7 +212,9 @@ def normalize_element(element: Dict[str, Any]) -> Dict[str, Any]:
         "name": tags.get("name", ""),
         "facility_type": infer_facility_type(tags),
         "address": build_address(tags),
-        "phone": tags.get("phone") or tags.get("contact:phone") or "",
+        "phone": build_phone(tags),
+        "website": tags.get("website") or tags.get("contact:website") or "",
+        "email": tags.get("email") or tags.get("contact:email") or "",
         "is_24_7": infer_is_24_7(tags),
         "is_emergency": infer_is_emergency(tags),
         "ownership": infer_ownership(tags),
@@ -268,6 +278,7 @@ def healthsites_attrs_to_tags(attrs: Dict[str, Any]) -> Dict[str, str]:
         "operator": "operator",
         "operator_type": "operator:type",
         "contact_number": "phone",
+        "url": "website",
         "opening_hours": "opening_hours",
         "emergency": "emergency",
         "addr_housenumber": "addr:housenumber",
@@ -298,6 +309,8 @@ def normalize_healthsites_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "facility_type": infer_facility_type(tags),
         "address": build_address(tags),
         "phone": tags.get("phone", ""),
+        "website": tags.get("website", ""),
+        "email": tags.get("email", ""),
         "is_24_7": infer_is_24_7(tags),
         "is_emergency": infer_is_emergency(tags),
         "ownership": infer_ownership(tags),

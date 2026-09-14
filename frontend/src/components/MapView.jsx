@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { styleForType } from "../lib/facilityStyle.js";
+import { directionsUrl, telHref } from "../lib/contact.js";
 
 const DEFAULT_CENTER = [34.0151, 71.5249]; // Roughly Peshawar / central KPK
 
@@ -22,6 +23,20 @@ function pinIcon(hex, selected) {
     iconAnchor: [size / 2, size],
     popupAnchor: [0, -size + 4],
   });
+}
+
+/** Keep Leaflet in sync when its container is resized (e.g. the view toggle). */
+function ResizeHandler() {
+  const map = useMap();
+
+  useEffect(() => {
+    const container = map.getContainer();
+    const observer = new ResizeObserver(() => map.invalidateSize());
+    observer.observe(container);
+    return () => observer.disconnect();
+  }, [map]);
+
+  return null;
 }
 
 /** Fit the map to the current results, and fly to a facility when selected. */
@@ -69,6 +84,7 @@ export function MapView({ facilities, selectedId, onSelect }) {
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"
         />
+        <ResizeHandler />
         <MapController facilities={facilities} selected={selected} />
 
         {facilities.map((f) => {
@@ -93,11 +109,25 @@ export function MapView({ facilities, selectedId, onSelect }) {
                     </div>
                   )}
                   {f.address && <div>{f.address}</div>}
-                  {f.phone && (
+                  {f.phone ? (
                     <div>
-                      <a href={`tel:${f.phone}`}>{f.phone}</a>
+                      📞{" "}
+                      <a href={telHref(f.phone)} className="font-semibold">
+                        {f.phone}
+                      </a>
                     </div>
+                  ) : (
+                    <div className="opacity-60">No phone in OpenStreetMap</div>
                   )}
+                  <div>
+                    <a
+                      href={directionsUrl(f.lat, f.lon)}
+                      target="_blank"
+                      rel="noopener noreferrer"
+                    >
+                      Directions →
+                    </a>
+                  </div>
                   <div className="flex flex-wrap gap-1 pt-0.5">
                     {f.is_emergency && (
                       <span className="rounded bg-red-100 px-1 py-0.5 text-[10px] font-semibold text-red-700">
