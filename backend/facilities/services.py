@@ -6,7 +6,7 @@ from typing import Any, Dict, List
 import requests
 from django.core.cache import cache
 
-OVERPASS_API_URL = os.environ.get("OVERPASS_API_URL", "https://overpass-api.de/api/interpreter")
+OVERPASS_API_URL = os.environ.get("OVERPASS_API_URL", "https://overpass.openstreetmap.fr/api/interpreter")
 
 # Cache timeout in seconds (e.g. 10 minutes)
 CACHE_TTL = int(os.environ.get("FACILITIES_CACHE_TTL", "600"))
