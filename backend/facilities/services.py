@@ -21,12 +21,17 @@ SUPPORTED_CITIES = [
     "Kohat",
     "Bannu",
     "Dera Ismail Khan",
-    "Dera Ismail Khan (D.I. Khan)",
     "Charsadda",
     "Nowshera",
     "Haripur",
     "Mansehra",
 ]
+
+SUPPORTED_CITIES_LOWER = {c.lower() for c in SUPPORTED_CITIES}
+
+
+def is_supported_city(city: str) -> bool:
+    return city.strip().lower() in SUPPORTED_CITIES_LOWER
 
 
 class OverpassError(Exception):

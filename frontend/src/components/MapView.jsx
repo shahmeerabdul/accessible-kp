@@ -1,4 +1,5 @@
-import { MapContainer, TileLayer, Marker, Popup } from "react-leaflet";
+import { useEffect } from "react";
+import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 
@@ -11,6 +12,18 @@ L.Icon.Default.mergeOptions({
 });
 
 const DEFAULT_CENTER = [34.0151, 71.5249]; // Roughly Peshawar / central KPK
+
+function Recenter({ center, zoom }) {
+  const map = useMap();
+
+  // MapContainer's `center`/`zoom` props only apply on first mount, so without
+  // this the map would stay wherever it was when the user picks a new city.
+  useEffect(() => {
+    map.setView(center, zoom);
+  }, [map, center[0], center[1], zoom]);
+
+  return null;
+}
 
 export function MapView({ facilities }) {
   const hasFacilities = facilities && facilities.length > 0;
@@ -25,6 +38,7 @@ export function MapView({ facilities }) {
         scrollWheelZoom={true}
         className="h-full w-full"
       >
+        <Recenter center={first} zoom={12} />
         <TileLayer
           attribution='&copy; <a href="https://www.openstreetmap.org/copyright">OpenStreetMap</a>'
           url="https://{s}.tile.openstreetmap.org/{z}/{x}/{y}.png"

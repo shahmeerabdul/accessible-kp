@@ -8,7 +8,7 @@ from rest_framework.response import Response
 from rest_framework.views import APIView
 
 from .serializers import FacilitySerializer
-from .services import OverpassError, get_facilities_by_city
+from .services import OverpassError, get_facilities_by_city, is_supported_city
 
 
 class FacilityListView(APIView):
@@ -24,6 +24,11 @@ class FacilityListView(APIView):
         if not city:
             return Response(
                 {"detail": "Query parameter 'city' is required."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+        if not is_supported_city(city):
+            return Response(
+                {"detail": f"'{city}' is not a supported KPK city."},
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
