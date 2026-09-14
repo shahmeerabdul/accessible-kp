@@ -344,8 +344,17 @@ def fetch_facilities_from_healthsites(city: str, limit: int | None = None) -> Li
             raise FacilityProviderError(f"Failed to connect to healthsites.io: {exc}") from exc
 
         if response.status_code == 403:
+            # Surface healthsites' own message -- it distinguishes a bad key from
+            # one that is simply still awaiting admin approval.
+            detail = ""
+            try:
+                detail = (response.json() or {}).get("detail", "")
+            except ValueError:
+                pass
             raise FacilityProviderError(
-                "healthsites.io rejected the API key. Regenerate it from your profile page."
+                f"healthsites.io rejected the request: {detail}"
+                if detail
+                else "healthsites.io rejected the API key (403)."
             )
         if response.status_code != 200:
             raise FacilityProviderError(
