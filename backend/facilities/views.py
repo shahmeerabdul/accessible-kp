@@ -10,6 +10,8 @@ from rest_framework.views import APIView
 from .serializers import FacilitySerializer
 from .services import OverpassError, get_facilities_by_city, is_supported_city
 
+MAX_LIMIT = 500
+
 
 class FacilityListView(APIView):
     """
@@ -36,7 +38,7 @@ class FacilityListView(APIView):
         limit: int | None = None
         if limit_param:
             try:
-                limit = max(1, int(limit_param))
+                limit = min(MAX_LIMIT, max(1, int(limit_param)))
             except ValueError:
                 return Response(
                     {"detail": "Query parameter 'limit' must be an integer."},
