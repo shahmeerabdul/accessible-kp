@@ -5,7 +5,9 @@ const baseURL =
 
 export const api = axios.create({
   baseURL,
-  timeout: 25000,
+  // Longer than the backend's own 30s Overpass timeout, so we don't
+  // give up client-side right before the backend would have responded.
+  timeout: 35000,
 });
 
 export async function fetchFacilities({ city, limit = 100 }) {
