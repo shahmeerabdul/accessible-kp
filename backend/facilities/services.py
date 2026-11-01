@@ -1,11 +1,14 @@
 from __future__ import annotations
 
+import logging
 import math
 import os
 from typing import Any, Dict, List
 
 import requests
 from django.core.cache import cache
+
+logger = logging.getLogger(__name__)
 
 # Which upstream to pull facility data from: "healthsites" or "overpass".
 FACILITIES_PROVIDER = os.environ.get("FACILITIES_PROVIDER", "healthsites").strip().lower()
@@ -78,7 +81,14 @@ def get_city_center(city: str) -> tuple[float, float] | None:
 
 
 class FacilityProviderError(Exception):
-    """Raised when an upstream facility data provider fails."""
+    """
+    Raised when an upstream facility data provider fails.
+
+    The message is returned to API clients, so it must stay generic: never put
+    request URLs or raw exception text in it (healthsites calls carry the API
+    key in the query string, and `requests` exceptions include the full URL).
+    Log the details server-side instead.
+    """
 
 
 def build_overpass_query(city: str, limit: int | None = None) -> str:
@@ -235,7 +245,8 @@ def fetch_facilities_from_overpass(city: str, limit: int | None = None) -> List[
             timeout=30,
         )
     except requests.RequestException as exc:
-        raise FacilityProviderError(f"Failed to connect to Overpass API: {exc}") from exc
+        logger.error("Overpass request failed: %s", type(exc).__name__)
+        raise FacilityProviderError("Failed to connect to the Overpass API") from None
 
     if response.status_code != 200:
         raise FacilityProviderError(f"Overpass API returned status {response.status_code}")
@@ -354,7 +365,10 @@ def fetch_facilities_from_healthsites(city: str, limit: int | None = None) -> Li
                 timeout=30,
             )
         except requests.RequestException as exc:
-            raise FacilityProviderError(f"Failed to connect to healthsites.io: {exc}") from exc
+            # Don't log or return str(exc): it contains the request URL, which
+            # includes the api-key query parameter.
+            logger.error("healthsites.io request failed: %s", type(exc).__name__)
+            raise FacilityProviderError("Failed to connect to healthsites.io") from None
 
         if response.status_code == 403:
             # Surface healthsites' own message -- it distinguishes a bad key from

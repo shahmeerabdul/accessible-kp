@@ -52,10 +52,12 @@ Data comes live from **OpenStreetMap** — via either the **healthsites.io** API
 
    Key variables:
 
-   - `DJANGO_SECRET_KEY` – any random string for local dev
-   - `DJANGO_DEBUG` – set to `true` for local development
-   - `DJANGO_ALLOWED_HOSTS` – usually `*` for local dev
-   - `CORS_ALLOWED_ORIGINS` – frontend origin, e.g. `http://localhost:5173`
+   - `DJANGO_SECRET_KEY` – any random string for local dev; must be a unique secret when `DJANGO_DEBUG` is not `true`
+   - `DJANGO_DEBUG` – off by default; set to `true` for local development only
+   - `DJANGO_ALLOWED_HOSTS` – usually `*` for local dev; real host name(s) (no `*`) otherwise
+   - `CORS_ALLOWED_ORIGINS` – frontend origin, e.g. `http://localhost:5173` (required when `DJANGO_DEBUG` is not `true`)
+   - `API_THROTTLE_RATE` – per-client rate limit (default `60/min`); over the limit the API returns `429`
+   - `API_NUM_PROXIES` – number of reverse proxies in front of Django (so the limit sees the real client IP)
    - `FACILITIES_PROVIDER` – data source: `healthsites` (default) or `overpass`
    - `HEALTHSITES_API_KEY` – required when using the `healthsites` provider. Get one free at
      [healthsites.io](https://healthsites.io/): sign in with an OpenStreetMap account, then generate
@@ -219,14 +221,14 @@ flies the map to that facility with an enlarged marker.
 
 For local development (React at `localhost:5173`, Django at `localhost:8000`):
 
-- In `backend/.env`, either:
-  - keep `CORS_ALLOW_ALL_ORIGINS=true` (easy for local), or
-  - set:
+- With `DJANGO_DEBUG=true`, all origins are allowed unless you set `CORS_ALLOWED_ORIGINS`.
+- To restrict it locally, set in `backend/.env`:
 
-    ```env
-    CORS_ALLOW_ALL_ORIGINS=false
-    CORS_ALLOWED_ORIGINS=http://localhost:5173
-    ```
+  ```env
+  CORS_ALLOWED_ORIGINS=http://localhost:5173
+  ```
+
+Outside `DJANGO_DEBUG=true`, `CORS_ALLOWED_ORIGINS` is required and the app refuses to start without it.
 
 ---
 
