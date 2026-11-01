@@ -45,35 +45,56 @@ OVERPASS_USER_AGENT = os.environ.get(
 # exact match (e.g. "Peshawar City Tehsil"). Matching on `area["name"=city]`
 # therefore never resolves and silently returns zero results. Searching by
 # radius around a known point sidesteps that tagging inconsistency entirely.
-CITY_COORDINATES: Dict[str, tuple[float, float]] = {
-    "peshawar": (34.0151, 71.5249),
-    "mardan": (34.1986, 72.0404),
-    "abbottabad": (34.1463, 73.2117),
-    "mingora": (34.7717, 72.3604),
-    "kohat": (33.5900, 71.4400),
-    "bannu": (32.9853, 70.6027),
-    "dera ismail khan": (31.8313, 70.9022),
-    "charsadda": (34.1520, 71.7380),
-    "nowshera": (34.0158, 71.9761),
-    "haripur": (33.9964, 72.9337),
-    "mansehra": (34.3329, 73.1997),
+#
+# The main town of each KPK district. Coordinates for the newer entries were
+# looked up in OpenStreetMap (Nominatim) and checked against the district named
+# in the result. Keep this in sync with frontend/src/constants/cities.js (a test
+# enforces it) and keep entries more than a few km apart, or two options would
+# return almost the same facilities.
+CITY_CENTERS: Dict[str, tuple[float, float]] = {
+    "Abbottabad": (34.1463, 73.2117),
+    "Alpuri": (34.9204, 72.6326),  # Shangla
+    "Bannu": (32.9853, 70.6027),
+    "Batkhela": (34.6134, 71.9677),  # Malakand
+    "Battagram": (34.6786, 73.0281),
+    "Charsadda": (34.1520, 71.7380),
+    "Chitral": (35.8509, 71.7902),
+    "Daggar": (34.5106, 72.4849),  # Buner
+    "Dassu": (35.2686, 73.2240),  # Upper Kohistan
+    "Dera Ismail Khan": (31.8313, 70.9022),
+    "Dir": (35.2080, 71.8780),  # Upper Dir
+    "Ghalanai": (34.3230, 71.3996),  # Mohmand
+    "Hangu": (33.5280, 71.0575),
+    "Haripur": (33.9964, 72.9337),
+    "Judba": (34.6124, 72.7890),  # Torghar
+    "Kalaya": (33.7475, 70.9621),  # Orakzai
+    "Karak": (33.1160, 71.0951),
+    "Khar": (34.7350, 71.5251),  # Bajaur
+    "Kohat": (33.5900, 71.4400),
+    "Lakki Marwat": (32.6057, 70.9114),
+    "Landi Kotal": (34.0937, 71.1466),  # Khyber
+    "Mansehra": (34.3329, 73.1997),
+    "Mardan": (34.1986, 72.0404),
+    "Mingora": (34.7717, 72.3604),  # Swat
+    "Miranshah": (33.0018, 70.0671),  # North Waziristan
+    "Nowshera": (34.0158, 71.9761),
+    "Parachinar": (33.8968, 70.1001),  # Kurram
+    "Pattan": (35.1102, 73.0052),  # Lower Kohistan (also covers Kolai-Palas)
+    "Peshawar": (34.0151, 71.5249),
+    "Sararogha": (32.5131, 70.0263),  # South Waziristan
+    "Swabi": (34.1262, 72.4743),
+    "Tank": (32.2097, 70.3881),
+    "Timergara": (34.8291, 71.8427),  # Lower Dir
+    "Wana": (32.3074, 69.5907),  # South Waziristan
 }
 
-SUPPORTED_CITIES = [
-    "Peshawar",
-    "Mardan",
-    "Abbottabad",
-    "Mingora",
-    "Kohat",
-    "Bannu",
-    "Dera Ismail Khan",
-    "Charsadda",
-    "Nowshera",
-    "Haripur",
-    "Mansehra",
-]
+SUPPORTED_CITIES = sorted(CITY_CENTERS)
 
-SUPPORTED_CITIES_LOWER = {c.lower() for c in SUPPORTED_CITIES}
+CITY_COORDINATES: Dict[str, tuple[float, float]] = {
+    name.lower(): center for name, center in CITY_CENTERS.items()
+}
+
+SUPPORTED_CITIES_LOWER = set(CITY_COORDINATES)
 
 
 def is_supported_city(city: str) -> bool:

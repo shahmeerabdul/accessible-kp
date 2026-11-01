@@ -1,3 +1,7 @@
+import itertools
+import math
+import re
+from pathlib import Path
 from unittest import mock
 
 from django.core.cache import cache
@@ -129,6 +133,35 @@ class CityListTests(SimpleTestCase):
         self.assertFalse(is_supported_city("Swat"))
         self.assertTrue(is_supported_city("Mingora"))
         self.assertNotIn("swat", services.CITY_COORDINATES)
+
+
+class CityCatalogueTests(SimpleTestCase):
+    """The city list: consistent with the frontend, sensible and not redundant."""
+
+    FRONTEND_CITIES = Path(__file__).resolve().parents[2] / "frontend" / "src" / "constants" / "cities.js"
+
+    def test_frontend_list_matches_backend(self):
+        frontend = re.findall(r'"([^"]+)"', self.FRONTEND_CITIES.read_text(encoding="utf-8"))
+        self.assertEqual(frontend, services.SUPPORTED_CITIES)
+
+    def test_lookups_are_case_insensitive(self):
+        self.assertTrue(is_supported_city("dera ismail khan"))
+        self.assertEqual(services.get_city_center(" PESHAWAR "), services.CITY_CENTERS["Peshawar"])
+
+    def test_all_centers_are_inside_kpk(self):
+        # Rough bounding box of Khyber Pakhtunkhwa.
+        for name, (lat, lon) in services.CITY_CENTERS.items():
+            self.assertTrue(31.0 <= lat <= 36.9 and 69.0 <= lon <= 74.2, name)
+
+    def test_no_two_cities_are_nearly_the_same_place(self):
+        def km(a, b):
+            (lat1, lon1), (lat2, lon2) = a, b
+            dlat, dlon = math.radians(lat2 - lat1), math.radians(lon2 - lon1)
+            h = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+            return 12742 * math.asin(math.sqrt(h))
+
+        for (a, ca), (b, cb) in itertools.combinations(services.CITY_CENTERS.items(), 2):
+            self.assertGreater(km(ca, cb), 5, f"{a} and {b} are too close together")
 
 
 class CachingTests(SimpleTestCase):

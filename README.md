@@ -204,7 +204,11 @@ in `frontend/tailwind.config.js`. Colour is never the only signal: each facility
 letter (H, C, B, R) on its list marker and map pin, and emergency / 24-hour status is written
 out as text.
 
-- **`CitySelect`** – dropdown for KPK cities (Peshawar, Mardan, Abbottabad, Mingora, Kohat, Bannu, D.I. Khan, etc.)
+- **`CitySelect`** – dropdown of 34 KPK towns: the main town of each district (Peshawar,
+  Mardan, Abbottabad, Mingora/Swat, Kohat, Bannu, D.I. Khan, Chitral, Dir, Parachinar, Wana,
+  …). Defined once in `CITY_CENTERS` (`backend/facilities/services.py`) and mirrored in
+  `frontend/src/constants/cities.js`; a test fails if the two drift apart. Chitral and Pattan
+  also stand in for their neighbouring districts (Upper Chitral, Kolai-Palas).
 - **`Filters`** – ownership radio buttons (All / Government / Private), "Has emergency
   services" and "Open 24 hours" checkboxes, and how many results to show
 - **`FacilityList`** – cards showing:
