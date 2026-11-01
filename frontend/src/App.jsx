@@ -10,21 +10,10 @@ const DEFAULT_LIMIT = 150;
 const PAGE_SIZE = 20;
 
 const VIEWS = [
-  { value: "split", label: "Split" },
+  { value: "split", label: "List and map" },
   { value: "list", label: "List" },
   { value: "map", label: "Map" },
 ];
-
-function Stat({ label, value, accent }) {
-  return (
-    <div className="rounded-lg border border-slate-800 bg-slate-950/60 px-2 py-1.5 text-center">
-      <div className={`text-base font-semibold leading-none ${accent}`}>{value}</div>
-      <div className="mt-1 text-[10px] font-medium uppercase tracking-wide text-slate-500">
-        {label}
-      </div>
-    </div>
-  );
-}
 
 export default function App() {
   const [city, setCity] = useState("");
@@ -100,23 +89,13 @@ export default function App() {
     [facilities, currentPage]
   );
 
-  // "Results" is the server-side match count; the other tiles describe what is loaded.
-  const stats = useMemo(() => {
-    const counts = { total, hospitals: 0, emergency: 0 };
-    for (const f of facilities) {
-      if (f.facility_type === "Hospital") counts.hospitals += 1;
-      if (f.is_emergency) counts.emergency += 1;
-    }
-    return counts;
-  }, [facilities, total]);
-
   // Tell the reader when the list is not the whole story.
   const truncationNotice = (() => {
     if (total > facilities.length) {
-      return `Showing the first ${facilities.length} of ${total} matches. Raise "Max results" to see more.`;
+      return `Showing the first ${facilities.length} of ${total} matches. Choose a higher number under "Show up to" to see more.`;
     }
     if (capped) {
-      return "This city reached the 500-facility fetch limit, so more facilities may exist in OpenStreetMap.";
+      return "This city reached the 500-facility limit, so more facilities may exist in OpenStreetMap.";
     }
     return "";
   })();
@@ -129,34 +108,34 @@ export default function App() {
     view === "split" ? "lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]" : "lg:grid-cols-1";
 
   return (
-    <div className="flex min-h-screen flex-col bg-slate-950 lg:h-screen lg:overflow-hidden">
-      <header className="shrink-0 border-b border-slate-800/80 bg-slate-950/80 px-4 py-2.5 backdrop-blur md:px-6">
-        <div className="flex flex-wrap items-center justify-between gap-2">
-          <div className="flex items-center gap-2.5">
-            <span className="flex h-8 w-8 items-center justify-center rounded-lg bg-brand-500/15 text-base ring-1 ring-brand-500/30">
-              🏥
-            </span>
-            <div>
-              <h1 className="text-sm font-semibold tracking-tight text-slate-50 md:text-base">
-                Accessible KPK
-              </h1>
-              <p className="text-[11px] text-slate-400">
-                Healthcare facility finder · Khyber Pakhtunkhwa
-              </p>
-            </div>
+    <div className="flex min-h-screen flex-col bg-paper lg:h-screen lg:overflow-hidden">
+      <a
+        href="#results"
+        className="sr-only focus:not-sr-only focus:absolute focus:left-3 focus:top-3 focus:z-[1000] focus:rounded-md focus:bg-surface focus:px-4 focus:py-2 focus:font-bold focus:text-brand"
+      >
+        Skip to results
+      </a>
+
+      <header className="shrink-0 border-b border-line bg-surface px-4 py-3 md:px-6">
+        <div className="flex flex-wrap items-center justify-between gap-3">
+          <div>
+            <h1 className="text-2xl font-bold leading-tight text-brand">Accessible KPK</h1>
+            <p className="text-base text-ink-soft">
+              Find hospitals, clinics and health units in Khyber Pakhtunkhwa
+            </p>
           </div>
 
-          <div className="flex items-center gap-1 rounded-lg border border-slate-800 bg-slate-900/70 p-0.5">
+          <div role="group" aria-label="Layout" className="flex overflow-hidden rounded-md border-2 border-ink">
             {VIEWS.map((v) => (
               <button
                 key={v.value}
                 type="button"
                 onClick={() => setView(v.value)}
                 aria-pressed={view === v.value}
-                className={`rounded-md px-2.5 py-1 text-xs font-medium transition ${
+                className={`px-4 py-2 text-base font-bold ${
                   view === v.value
-                    ? "bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/40"
-                    : "text-slate-400 hover:text-slate-200"
+                    ? "bg-brand text-white"
+                    : "bg-surface text-ink hover:bg-brand-tint"
                 }`}
               >
                 {v.label}
@@ -166,8 +145,11 @@ export default function App() {
         </div>
       </header>
 
-      <div className="flex min-w-0 flex-1 flex-col gap-3 p-3 lg:min-h-0 lg:flex-row lg:gap-4 lg:p-4">
-        <aside className="flex w-full shrink-0 flex-col gap-3 rounded-xl border border-slate-800 bg-slate-900/50 p-3 lg:w-[290px] lg:overflow-y-auto">
+      <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 lg:min-h-0 lg:flex-row">
+        <aside
+          aria-label="Search and filters"
+          className="flex w-full shrink-0 flex-col gap-6 rounded-lg border border-line bg-surface p-4 lg:w-[300px] lg:overflow-y-auto"
+        >
           <CitySelect value={city} onChange={setCity} />
           <Filters
             ownership={ownership}
@@ -179,34 +161,28 @@ export default function App() {
             limit={limit}
             setLimit={setLimit}
           />
-          {hasResults && (
-            <div className="grid grid-cols-3 gap-1.5">
-              <Stat label="Results" value={stats.total} accent="text-slate-100" />
-              <Stat label="Hospitals" value={stats.hospitals} accent="text-rose-300" />
-              <Stat label="Emergency" value={stats.emergency} accent="text-amber-300" />
-            </div>
-          )}
         </aside>
 
-        <main className={`grid min-w-0 flex-1 gap-3 lg:min-h-0 lg:gap-4 ${gridCols}`}>
+        <main className={`grid min-w-0 flex-1 gap-4 lg:min-h-0 ${gridCols}`}>
           {showList && (
-            <section className="flex min-w-0 flex-col gap-2 rounded-xl border border-slate-800 bg-slate-900/40 p-3 lg:min-h-0">
-              <div className="flex shrink-0 items-baseline justify-between gap-2">
-                <h2 className="text-xs font-semibold uppercase tracking-wider text-slate-400">
+            <section
+              id="results"
+              aria-label="Results"
+              className="flex min-w-0 flex-col gap-3 lg:min-h-0"
+            >
+              <div className="shrink-0">
+                <h2 className="text-xl font-bold">
                   {city ? `Facilities in ${city}` : "Facilities"}
                 </h2>
                 {hasResults && (
-                  <span className="text-[11px] text-slate-500">
-                    Page {currentPage} of {totalPages}
-                  </span>
+                  <p role="status" className="text-base text-ink-soft">
+                    {total} {total === 1 ? "facility" : "facilities"} found
+                  </p>
                 )}
               </div>
 
               {hasResults && truncationNotice && (
-                <p
-                  role="status"
-                  className="shrink-0 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-snug text-amber-200"
-                >
+                <p className="shrink-0 border-l-4 border-amber-600 bg-amber-50 px-3 py-2 text-base">
                   {truncationNotice}
                 </p>
               )}
@@ -236,7 +212,7 @@ export default function App() {
           )}
 
           {showMap && (
-            <section className="h-[55vh] min-w-0 lg:h-auto lg:min-h-0">
+            <section aria-label="Map" className="h-[55vh] min-w-0 lg:h-auto lg:min-h-0">
               <MapView
                 facilities={pageItems}
                 selectedId={selectedId}

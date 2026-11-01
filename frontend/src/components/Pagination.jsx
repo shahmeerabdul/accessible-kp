@@ -10,59 +10,56 @@ export function Pagination({ page, totalPages, total, pageSize, onPage }) {
   const to = Math.min(totalPages, from + 2);
   for (let i = from; i <= to; i += 1) numbers.push(i);
 
-  const navBtn =
-    "rounded-md border border-slate-700 bg-slate-950/70 px-2 py-1 text-xs font-medium text-slate-300 transition hover:border-slate-600 hover:text-slate-100 disabled:cursor-not-allowed disabled:opacity-35";
+  const button =
+    "min-w-[2.75rem] rounded-md border-2 border-ink bg-surface px-3 py-2 text-base font-bold hover:bg-brand-tint disabled:cursor-not-allowed disabled:border-line disabled:text-ink-soft disabled:hover:bg-surface";
 
   return (
-    <div className="flex shrink-0 flex-wrap items-center justify-between gap-2 border-t border-slate-800 pt-2">
-      <span className="text-[11px] text-slate-500">
-        <span className="font-semibold text-slate-300">
-          {first}–{last}
-        </span>{" "}
-        of {total}
-      </span>
+    <nav
+      aria-label="Pagination"
+      className="flex shrink-0 flex-wrap items-center justify-between gap-3 border-t border-line pt-3"
+    >
+      <p className="text-base">
+        Showing <strong>{first}–{last}</strong> of {total}
+      </p>
 
-      <div className="flex items-center gap-1">
+      <div className="flex flex-wrap items-center gap-2">
         <button
           type="button"
-          className={navBtn}
+          className={button}
           onClick={() => onPage(page - 1)}
           disabled={page <= 1}
-          aria-label="Previous page"
         >
-          ‹
+          Previous
         </button>
 
-        {from > 1 && <span className="px-1 text-[11px] text-slate-600">…</span>}
+        {from > 1 && <span aria-hidden="true">…</span>}
 
         {numbers.map((n) => (
           <button
             key={n}
             type="button"
             onClick={() => onPage(n)}
+            aria-label={`Page ${n}`}
             aria-current={n === page ? "page" : undefined}
-            className={`rounded-md px-2 py-1 text-xs font-medium transition ${
-              n === page
-                ? "bg-brand-500/20 text-brand-200 ring-1 ring-brand-500/50"
-                : "text-slate-400 hover:bg-slate-800 hover:text-slate-200"
+            className={`${button} ${
+              n === page ? "!border-brand !bg-brand !text-white hover:!bg-brand-dark" : ""
             }`}
           >
             {n}
           </button>
         ))}
 
-        {to < totalPages && <span className="px-1 text-[11px] text-slate-600">…</span>}
+        {to < totalPages && <span aria-hidden="true">…</span>}
 
         <button
           type="button"
-          className={navBtn}
+          className={button}
           onClick={() => onPage(page + 1)}
           disabled={page >= totalPages}
-          aria-label="Next page"
         >
-          ›
+          Next
         </button>
       </div>
-    </div>
+    </nav>
   );
 }

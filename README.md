@@ -191,22 +191,33 @@ Data comes live from **OpenStreetMap** — via either the **healthsites.io** API
 
 ### Frontend architecture
 
-The UI is a three-pane layout: a filter rail, a results panel, and the map.
-A **Split / List / Map** toggle in the header controls which panes are shown —
+The UI is a three-pane layout: a search/filter sidebar, a results panel, and the map.
+A **List and map / List / Map** toggle in the header controls which panes are shown —
 List mode hides the map and lays results out as a multi-column grid.
 
+**Design ("civic" style):** a warm off-white page with near-black text and a single deep
+green accent, set in [Atkinson Hyperlegible](https://fonts.google.com/specimen/Atkinson+Hyperlegible)
+(designed for low-vision readers; system fonts are the fallback). Body text is 16px or
+larger, controls are real form elements (radio buttons, checkboxes, selects), keyboard
+focus is clearly outlined, and there is a "Skip to results" link. Colours are defined once
+in `frontend/tailwind.config.js`. Colour is never the only signal: each facility type has a
+letter (H, C, B, R) on its list marker and map pin, and emergency / 24-hour status is written
+out as text.
+
 - **`CitySelect`** – dropdown for KPK cities (Peshawar, Mardan, Abbottabad, Mingora, Kohat, Bannu, D.I. Khan, etc.)
-- **`Filters`** – segmented ownership control (All / Govt / Private), Emergency and
-  Open 24/7 toggle pills, and the fetch limit
+- **`Filters`** – ownership radio buttons (All / Government / Private), "Has emergency
+  services" and "Open 24 hours" checkboxes, and how many results to show
 - **`FacilityList`** – cards showing:
-  - name, facility type, address
-  - facility-type, ownership, emergency and 24/7 badges
+  - name, facility type, ownership and address
+  - "Emergency services" / "Open 24 hours" as plain text when known
   - a contact row: tap-to-call phone, website and email when present, plus a
-    **Directions** link (available for every facility, since it only needs coordinates)
-- **`MapView`** – Leaflet map with markers colour-coded by facility type and a matching
-  legend. Auto-fits bounds to the current results, flies to the selected facility, and
-  calls `invalidateSize()` on container resize so the view toggle doesn't leave grey tiles.
-- **`Pagination`** – page numbers plus prev/next, showing the current range
+    **Directions** link (available for every facility, since it only needs coordinates) and
+    a **Show on map** button
+- **`MapView`** – Leaflet map (standard OpenStreetMap tiles, desaturated with CSS) with
+  letter-marked pins and a matching key. Auto-fits bounds to the current results, flies to
+  the selected facility, and calls `invalidateSize()` on container resize so the view
+  toggle doesn't leave grey tiles.
+- **`Pagination`** – Previous / Next and page numbers, showing the current range
 
 The root `App` component:
 
@@ -331,12 +342,12 @@ setup, including nginx and systemd examples, the production settings, and TLS.
 - REST endpoint: `GET /api/facilities` by city or by location, with filters, text search and sorting
 - Basic in‑memory caching via Django cache framework (`LocMemCache`)
 - React SPA with:
-  - responsive layout (mobile + desktop) with Split / List / Map view modes
+  - responsive layout (mobile + desktop) with List-and-map / List / Map view modes
   - cards list + interactive Leaflet map, linked by a shared selection
   - client-side pagination at 20 per page
   - server-side filters for ownership, emergency, 24/7, plus a notice when results are cut off
   - contact details (phone / website / email) plus Directions for every facility
-  - colour-coded map markers with a legend, auto-fitted to results
+  - letter-marked map pins with a key, auto-fitted to results
   - loading skeletons, empty, and error states
 - Env‑driven configuration for both backend and frontend
 
