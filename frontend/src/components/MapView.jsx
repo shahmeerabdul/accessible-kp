@@ -3,6 +3,7 @@ import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { styleForType } from "../lib/facilityStyle.js";
+import { facilityTitle } from "../lib/facilityName.js";
 import { directionsUrl, telHref } from "../lib/contact.js";
 
 const DEFAULT_CENTER = [34.0151, 71.5249]; // Roughly Peshawar / central KPK
@@ -101,7 +102,7 @@ export function MapView({ facilities, selectedId, onSelect }) {
               <Popup>
                 <div className="space-y-1 text-xs">
                   <div className="text-sm font-semibold">
-                    {f.name || "Unnamed facility"}
+                    {facilityTitle(f)}
                   </div>
                   {f.facility_type && (
                     <div className="font-medium" style={{ color: style.hex }}>

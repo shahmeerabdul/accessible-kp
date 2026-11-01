@@ -2,7 +2,7 @@ from rest_framework import serializers
 
 
 class FacilitySerializer(serializers.Serializer):
-    """Serializer for a healthcare facility coming from Overpass."""
+    """Serializer for a normalized healthcare facility (healthsites.io or Overpass)."""
 
     osm_id = serializers.CharField()
     name = serializers.CharField(allow_blank=True, required=False)

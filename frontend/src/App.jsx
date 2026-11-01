@@ -30,6 +30,10 @@ export default function App() {
   const [city, setCity] = useState("");
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
   const [facilities, setFacilities] = useState([]);
+  // Matches on the server (can exceed facilities.length) and whether the city
+  // hit the backend's fetch cap.
+  const [total, setTotal] = useState(0);
+  const [capped, setCapped] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
@@ -43,6 +47,8 @@ export default function App() {
   useEffect(() => {
     if (!city) {
       setFacilities([]);
+      setTotal(0);
+      setCapped(false);
       setError("");
       return;
     }
@@ -52,9 +58,14 @@ export default function App() {
     setError("");
     setSelectedId(null);
 
-    fetchFacilities({ city, limit })
-      .then((data) => {
-        if (!cancelled) setFacilities(Array.isArray(data) ? data : []);
+    // Filters are applied by the backend, before the limit.
+    fetchFacilities({ city, limit, ownership, emergency: emergencyOnly, open24 })
+      .then((result) => {
+        if (!cancelled) {
+          setFacilities(result.facilities);
+          setTotal(result.total);
+          setCapped(result.capped);
+        }
       })
       .catch((err) => {
         if (!cancelled) {
@@ -64,6 +75,8 @@ export default function App() {
               "Could not load facilities. Check that the Django backend is running."
           );
           setFacilities([]);
+          setTotal(0);
+          setCapped(false);
         }
       })
       .finally(() => {
@@ -73,40 +86,40 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [city, limit]);
-
-  const filteredFacilities = useMemo(
-    () =>
-      facilities.filter((f) => {
-        if (ownership && f.ownership !== ownership) return false;
-        if (emergencyOnly && !f.is_emergency) return false;
-        if (open24 && !f.is_24_7) return false;
-        return true;
-      }),
-    [facilities, ownership, emergencyOnly, open24]
-  );
+  }, [city, limit, ownership, emergencyOnly, open24]);
 
   // Any change to the result set should send the reader back to page 1.
   useEffect(() => {
     setPage(1);
   }, [city, ownership, emergencyOnly, open24, limit]);
 
-  const totalPages = Math.max(1, Math.ceil(filteredFacilities.length / PAGE_SIZE));
+  const totalPages = Math.max(1, Math.ceil(facilities.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
   const pageItems = useMemo(
-    () =>
-      filteredFacilities.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
-    [filteredFacilities, currentPage]
+    () => facilities.slice((currentPage - 1) * PAGE_SIZE, currentPage * PAGE_SIZE),
+    [facilities, currentPage]
   );
 
+  // "Results" is the server-side match count; the other tiles describe what is loaded.
   const stats = useMemo(() => {
-    const counts = { total: filteredFacilities.length, hospitals: 0, emergency: 0 };
-    for (const f of filteredFacilities) {
+    const counts = { total, hospitals: 0, emergency: 0 };
+    for (const f of facilities) {
       if (f.facility_type === "Hospital") counts.hospitals += 1;
       if (f.is_emergency) counts.emergency += 1;
     }
     return counts;
-  }, [filteredFacilities]);
+  }, [facilities, total]);
+
+  // Tell the reader when the list is not the whole story.
+  const truncationNotice = (() => {
+    if (total > facilities.length) {
+      return `Showing the first ${facilities.length} of ${total} matches. Raise "Max results" to see more.`;
+    }
+    if (capped) {
+      return "This city reached the 500-facility fetch limit, so more facilities may exist in OpenStreetMap.";
+    }
+    return "";
+  })();
 
   const showList = view !== "map";
   const showMap = view !== "list";
@@ -189,6 +202,15 @@ export default function App() {
                 )}
               </div>
 
+              {hasResults && truncationNotice && (
+                <p
+                  role="status"
+                  className="shrink-0 rounded-lg border border-amber-500/30 bg-amber-500/10 px-2.5 py-1.5 text-[11px] leading-snug text-amber-200"
+                >
+                  {truncationNotice}
+                </p>
+              )}
+
               <div className="min-w-0 flex-1 lg:min-h-0 lg:overflow-y-auto lg:pr-1">
                 <FacilityList
                   facilities={pageItems}
@@ -205,7 +227,7 @@ export default function App() {
                 <Pagination
                   page={currentPage}
                   totalPages={totalPages}
-                  total={filteredFacilities.length}
+                  total={facilities.length}
                   pageSize={PAGE_SIZE}
                   onPage={(p) => setPage(Math.min(Math.max(1, p), totalPages))}
                 />
