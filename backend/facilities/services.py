@@ -2,6 +2,7 @@ from __future__ import annotations
 
 import math
 import os
+import re
 from typing import Any, Dict, List
 
 import requests
@@ -24,6 +25,11 @@ CACHE_TTL = int(os.environ.get("FACILITIES_CACHE_TTL", "600"))
 # Radius (meters) searched around each city's center point.
 CITY_SEARCH_RADIUS_METERS = int(os.environ.get("CITY_SEARCH_RADIUS_METERS", "12000"))
 
+# Most facilities fetched from a provider for one city. A city is fetched (and
+# cached) once at this size; the API filters and applies the caller's limit on
+# top, so filters see every fetched facility, not just the first page of them.
+FETCH_CAP = 500
+
 # Overpass requires a descriptive User-Agent; public instances 406-reject
 # requests carrying a generic client User-Agent (e.g. python-requests/...).
 OVERPASS_USER_AGENT = os.environ.get(
@@ -41,7 +47,6 @@ CITY_COORDINATES: Dict[str, tuple[float, float]] = {
     "mardan": (34.1986, 72.0404),
     "abbottabad": (34.1463, 73.2117),
     "mingora": (34.7717, 72.3604),
-    "swat": (34.7717, 72.3604),
     "kohat": (33.5900, 71.4400),
     "bannu": (32.9853, 70.6027),
     "dera ismail khan": (31.8313, 70.9022),
@@ -56,7 +61,6 @@ SUPPORTED_CITIES = [
     "Mardan",
     "Abbottabad",
     "Mingora",
-    "Swat",
     "Kohat",
     "Bannu",
     "Dera Ismail Khan",
@@ -81,7 +85,7 @@ class FacilityProviderError(Exception):
     """Raised when an upstream facility data provider fails."""
 
 
-def build_overpass_query(city: str, limit: int | None = None) -> str:
+def build_overpass_query(city: str, limit: int | None = FETCH_CAP) -> str:
     """
     Build an Overpass QL query to fetch healthcare facilities near the given
     city's center point.
@@ -99,9 +103,9 @@ def build_overpass_query(city: str, limit: int | None = None) -> str:
       way["amenity"~"hospital|clinic|doctors"](around:{radius},{lat},{lon});
       relation["amenity"~"hospital|clinic|doctors"](around:{radius},{lat},{lon});
 
-      node["healthcare"~"hospital|clinic|centre"](around:{radius},{lat},{lon});
-      way["healthcare"~"hospital|clinic|centre"](around:{radius},{lat},{lon});
-      relation["healthcare"~"hospital|clinic|centre"](around:{radius},{lat},{lon});
+      node["healthcare"~"hospital|clinic|centre|doctor"](around:{radius},{lat},{lon});
+      way["healthcare"~"hospital|clinic|centre|doctor"](around:{radius},{lat},{lon});
+      relation["healthcare"~"hospital|clinic|centre|doctor"](around:{radius},{lat},{lon});
     );
     """
 
@@ -115,9 +119,10 @@ def infer_facility_type(tags: Dict[str, Any]) -> str:
     amenity = tags.get("amenity", "").lower()
     name = tags.get("name", "").lower()
 
-    if "bhu" in name or "basic health unit" in name:
+    # Whole-word matches only, so e.g. "Abhuman Clinic" is not a BHU.
+    if re.search(r"\bbhus?\b", name) or "basic health unit" in name:
         return "BHU"
-    if "rhc" in name or "rural health centre" in name or "rural health center" in name:
+    if re.search(r"\brhcs?\b", name) or re.search(r"rural health cent(re|er)", name):
         return "RHC"
 
     if healthcare == "hospital" or amenity == "hospital":
@@ -132,23 +137,38 @@ def infer_facility_type(tags: Dict[str, Any]) -> str:
     return ""
 
 
+GOV_TAG_PATTERN = re.compile(r"\b(government|govt|public|ministry of health|health department)\b")
+PRIVATE_TAG_PATTERN = re.compile(r"\b(private|pvt)\b")
+
+# Name markers that identify public-sector facilities in Pakistan.
+GOV_NAME_PATTERN = re.compile(
+    r"\b(dhq|thq|bhus?|rhcs?|govt|government)\b"
+    r"|district headquarters?|tehsil headquarters?|basic health unit"
+    r"|rural health cent(re|er)|civil (hospital|dispensary)"
+)
+
+
 def infer_ownership(tags: Dict[str, Any]) -> str:
     """
-    Try to decide if a facility is government or private based on common OSM tags.
+    Decide if a facility is government or private.
+
+    Explicit operator/ownership tags win. Otherwise fall back to unmistakable
+    government markers in the name. Anything else is unknown ("") rather than a
+    guess -- e.g. the word "clinic" says nothing about who owns it.
     """
     operator_type = tags.get("operator:type", "").lower()
     ownership = tags.get("ownership", "").lower()
     operator = tags.get("operator", "").lower()
-
-    gov_keywords = ["government", "public", "ministry of health", "health department"]
-    private_keywords = ["private", "pvt", "pvt.", "clinic", "trust"]
+    name = tags.get("name", "").lower()
 
     text = " ".join([operator_type, ownership, operator])
 
-    if any(k in text for k in gov_keywords):
+    if GOV_TAG_PATTERN.search(text):
         return "government"
-    if any(k in text for k in private_keywords):
+    if PRIVATE_TAG_PATTERN.search(text):
         return "private"
+    if GOV_NAME_PATTERN.search(name):
+        return "government"
 
     return ""
 
@@ -194,6 +214,28 @@ def build_address(tags: Dict[str, Any]) -> str:
     return ", ".join(p for p in parts if p)
 
 
+def make_osm_id(osm_type: Any, osm_id: Any) -> str:
+    """
+    Unique id for a facility, e.g. "way/123". OSM numbers nodes, ways and
+    relations separately, so the bare numeric id can collide across types.
+    """
+    if osm_type:
+        return f"{osm_type}/{osm_id}"
+    return str(osm_id)
+
+
+def dedupe_facilities(facilities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """Drop repeated facilities (same osm_id), keeping the first occurrence."""
+    seen: set[str] = set()
+    unique: List[Dict[str, Any]] = []
+    for facility in facilities:
+        if facility["osm_id"] in seen:
+            continue
+        seen.add(facility["osm_id"])
+        unique.append(facility)
+    return unique
+
+
 def normalize_element(element: Dict[str, Any]) -> Dict[str, Any]:
     tags = element.get("tags", {}) or {}
     lat = element.get("lat")
@@ -208,7 +250,7 @@ def normalize_element(element: Dict[str, Any]) -> Dict[str, Any]:
         raise FacilityProviderError("Missing coordinates for element")
 
     facility = {
-        "osm_id": str(element.get("id")),
+        "osm_id": make_osm_id(element.get("type"), element.get("id")),
         "name": tags.get("name", ""),
         "facility_type": infer_facility_type(tags),
         "address": build_address(tags),
@@ -224,8 +266,8 @@ def normalize_element(element: Dict[str, Any]) -> Dict[str, Any]:
     return facility
 
 
-def fetch_facilities_from_overpass(city: str, limit: int | None = None) -> List[Dict[str, Any]]:
-    query = build_overpass_query(city, limit)
+def fetch_facilities_from_overpass(city: str) -> List[Dict[str, Any]]:
+    query = build_overpass_query(city, FETCH_CAP)
 
     try:
         response = requests.post(
@@ -255,7 +297,7 @@ def fetch_facilities_from_overpass(city: str, limit: int | None = None) -> List[
             # Skip malformed elements
             continue
 
-    return facilities
+    return dedupe_facilities(facilities)
 
 
 def build_bbox(lat: float, lon: float, radius_m: int) -> tuple[float, float, float, float]:
@@ -279,6 +321,10 @@ def healthsites_attrs_to_tags(attrs: Dict[str, Any]) -> Dict[str, str]:
         "operator_type": "operator:type",
         "contact_number": "phone",
         "url": "website",
+        # Not seen in healthsites responses so far; mapped defensively so an
+        # email is shown if the API ever returns one under either name.
+        "email": "email",
+        "contact_email": "email",
         "opening_hours": "opening_hours",
         "emergency": "emergency",
         "addr_housenumber": "addr:housenumber",
@@ -287,6 +333,8 @@ def healthsites_attrs_to_tags(attrs: Dict[str, Any]) -> Dict[str, str]:
     }
     tags: Dict[str, str] = {}
     for source_key, tag_key in mapping.items():
+        if tag_key in tags:
+            continue  # first matching source wins
         value = attrs.get(source_key)
         if value is not None and str(value).strip():
             tags[tag_key] = str(value)
@@ -304,7 +352,7 @@ def normalize_healthsites_record(record: Dict[str, Any]) -> Dict[str, Any]:
     tags = healthsites_attrs_to_tags(attrs)
 
     return {
-        "osm_id": str(record.get("osm_id")),
+        "osm_id": make_osm_id(record.get("osm_type"), record.get("osm_id")),
         "name": tags.get("name", ""),
         "facility_type": infer_facility_type(tags),
         "address": build_address(tags),
@@ -319,7 +367,7 @@ def normalize_healthsites_record(record: Dict[str, Any]) -> Dict[str, Any]:
     }
 
 
-def fetch_facilities_from_healthsites(city: str, limit: int | None = None) -> List[Dict[str, Any]]:
+def fetch_facilities_from_healthsites(city: str) -> List[Dict[str, Any]]:
     if not HEALTHSITES_API_KEY:
         raise FacilityProviderError(
             "HEALTHSITES_API_KEY is not set. Sign in at https://healthsites.io/ with an "
@@ -335,9 +383,10 @@ def fetch_facilities_from_healthsites(city: str, limit: int | None = None) -> Li
     min_lng, min_lat, max_lng, max_lat = build_bbox(lat, lon, CITY_SEARCH_RADIUS_METERS)
     extent = f"{min_lng},{min_lat},{max_lng},{max_lat}"
 
-    target = limit or 500
+    target = FETCH_CAP
     per_page = min(target, 100)
     facilities: List[Dict[str, Any]] = []
+    seen_ids: set[str] = set()
     page = 1
 
     while len(facilities) < target and page <= 10:
@@ -384,9 +433,13 @@ def fetch_facilities_from_healthsites(city: str, limit: int | None = None) -> Li
 
         for record in records:
             try:
-                facilities.append(normalize_healthsites_record(record))
+                facility = normalize_healthsites_record(record)
             except FacilityProviderError:
                 continue
+            if facility["osm_id"] in seen_ids:
+                continue
+            seen_ids.add(facility["osm_id"])
+            facilities.append(facility)
 
         if len(records) < per_page:
             break
@@ -395,24 +448,43 @@ def fetch_facilities_from_healthsites(city: str, limit: int | None = None) -> Li
     return facilities[:target]
 
 
-def get_facilities_by_city(city: str, limit: int | None = None) -> List[Dict[str, Any]]:
+def filter_facilities(
+    facilities: List[Dict[str, Any]],
+    ownership: str = "",
+    emergency_only: bool = False,
+    open_24_7_only: bool = False,
+) -> List[Dict[str, Any]]:
+    """Keep only facilities matching every given filter (empty/False = no filter)."""
+    return [
+        f
+        for f in facilities
+        if (not ownership or f.get("ownership") == ownership)
+        and (not emergency_only or f.get("is_emergency"))
+        and (not open_24_7_only or f.get("is_24_7"))
+    ]
+
+
+def get_facilities_by_city(city: str) -> List[Dict[str, Any]]:
     """
     High-level function used by the view.
+
     Applies basic validation and caching, then calls the configured provider.
+    A city is fetched and cached once (up to FETCH_CAP facilities) regardless
+    of filters or the caller's limit; the view filters and slices the result.
     """
     city_clean = city.strip()
     if not city_clean:
         raise FacilityProviderError("City name is required")
 
-    cache_key = f"facilities:{FACILITIES_PROVIDER}:{city_clean.lower()}:{limit or 'all'}"
+    cache_key = f"facilities:{FACILITIES_PROVIDER}:{city_clean.lower()}"
     cached = cache.get(cache_key)
     if cached is not None:
         return cached
 
     if FACILITIES_PROVIDER == "healthsites":
-        facilities = fetch_facilities_from_healthsites(city_clean, limit)
+        facilities = fetch_facilities_from_healthsites(city_clean)
     elif FACILITIES_PROVIDER == "overpass":
-        facilities = fetch_facilities_from_overpass(city_clean, limit)
+        facilities = fetch_facilities_from_overpass(city_clean)
     else:
         raise FacilityProviderError(
             f"Unknown FACILITIES_PROVIDER '{FACILITIES_PROVIDER}' (expected 'healthsites' or 'overpass')"

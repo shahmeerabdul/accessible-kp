@@ -80,28 +80,33 @@ Data comes live from **OpenStreetMap** — via either the **healthsites.io** API
 6. **API endpoint**
 
    - `GET /api/facilities?city=<city_name>&limit=<int>`
+     optionally with `&ownership=government|private`, `&emergency=true`, `&open_24_7=true`
 
    Example:
 
    ```bash
-   curl "http://localhost:8000/api/facilities?city=Peshawar&limit=100"
+   curl "http://localhost:8000/api/facilities?city=Peshawar&limit=100&emergency=true"
    ```
 
    The backend:
 
    - Validates `city` against the supported KPK list (unknown cities get a `400`)
-   - Clamps `limit` to `1…500`, defaulting to `500` when omitted
-   - Queries the configured provider around the city's centre coordinates
+   - Fetches up to 500 facilities for the city (`FETCH_CAP`), de-duplicated, and caches that
+     once per `(provider, city)` using Django's `LocMemCache`
+   - Applies the filters to **all** fetched facilities, *then* clamps to `limit`
+     (`1…500`, default `500`) — so a filter never misses matches beyond the first `limit`
+   - Rejects bad `ownership` / `emergency` / `open_24_7` values with a `400`
    - Normalises results into a consistent facility shape regardless of provider
-   - Applies **in‑memory caching** by `(provider, city, limit)` using Django's `LocMemCache`
-   - Returns JSON via DRF serializer
+   - Returns JSON via DRF serializer, plus two response headers:
+     - `X-Total-Count` – facilities matching the filters (can be larger than the array returned)
+     - `X-Upstream-Capped` – `true` if the city hit the 500 cap, so more may exist in OSM
 
    Response shape:
 
    ```json
    [
      {
-       "osm_id": "854341089",
+       "osm_id": "way/854341089",
        "name": "CMH Peshawar - Combined Military Hospital",
        "facility_type": "Hospital",
        "address": "",
@@ -155,7 +160,7 @@ The UI is a three-pane layout: a filter rail, a results panel, and the map.
 A **Split / List / Map** toggle in the header controls which panes are shown —
 List mode hides the map and lays results out as a multi-column grid.
 
-- **`CitySelect`** – dropdown for KPK cities (Peshawar, Mardan, Abbottabad, Mingora/Swat, Kohat, Bannu, D.I. Khan, etc.)
+- **`CitySelect`** – dropdown for KPK cities (Peshawar, Mardan, Abbottabad, Mingora, Kohat, Bannu, D.I. Khan, etc.)
 - **`Filters`** – segmented ownership control (All / Govt / Private), Emergency and
   Open 24/7 toggle pills, and the fetch limit
 - **`FacilityList`** – cards showing:
@@ -171,10 +176,14 @@ List mode hides the map and lays results out as a multi-column grid.
 The root `App` component:
 
 - Manages selected city, filters, result limit, view mode, pagination and selection
-- Calls `GET /api/facilities` via Axios with `city` and `limit`
+- Calls `GET /api/facilities` via Axios with `city`, `limit` and the active filters
+  (filtering happens on the server, before the limit)
 - Handles **loading** (skeletons), **error**, and **empty** states
-- Applies filters client-side, then paginates at **20 per page**, resetting to page 1
-  whenever the city or filters change
+- Shows a notice when results are cut off (more matches than the limit, or the city hit
+  the 500-facility fetch cap)
+- Paginates the loaded results at **20 per page**, resetting to page 1 whenever the city
+  or filters change
+- Shows "Unnamed <type>" for facilities with no name
 - Feeds only the current page to both the list and the map, keeping the two in sync and
   avoiding overlapping-pin clutter on dense cities
 
@@ -197,20 +206,25 @@ flies the map to that facility with an enlarged marker.
   - Both normalise through the same `infer_*` helpers, so the API response shape is identical
     regardless of provider
   - Normalises each element into a facility object:
-    - `osm_id`, `name`, `facility_type` (`Hospital`, `Clinic`, `BHU`, `RHC`, etc.)
+    - `osm_id` (type-qualified and unique, e.g. `node/123`, `way/123`), `name`,
+      `facility_type` (`Hospital`, `Clinic`, `BHU`, `RHC`, etc.; BHU/RHC match whole words only)
     - `address`, `phone`, `website`, `email`
     - `is_24_7`, `is_emergency`
-    - `ownership` (government vs private, best‑effort from tags)
+    - `ownership` (government vs private): explicit operator/ownership tags first, then
+      unmistakable government markers in the name (DHQ, THQ, BHU, RHC, Civil Hospital, …);
+      otherwise left empty rather than guessed
     - `lat`, `lon`
   - Wraps low-level/network errors into a custom `FacilityProviderError`
-  - Uses Django cache (`LocMemCache`) keyed by `(provider, city, limit)` so switching
+  - De-duplicates facilities by `osm_id` and provides `filter_facilities`
+  - Uses Django cache (`LocMemCache`) keyed by `(provider, city)` so switching
     providers doesn't serve stale results from the other one
 
 - **`facilities/views.py`**
   - DRF `APIView` (`FacilityListView`) bound to `GET /api/facilities`
   - Validates query parameters (`city` against the supported list, optional `limit`
-    clamped to `MAX_LIMIT`)
-  - Delegates to the service layer and serialises results via `FacilitySerializer`
+    clamped to `MAX_LIMIT`, optional `ownership` / `emergency` / `open_24_7` filters)
+  - Delegates to the service layer, filters, applies the limit and serialises results via
+    `FacilitySerializer`; sets the `X-Total-Count` / `X-Upstream-Capped` headers
   - Returns clean error responses (400 for bad input, 502 for upstream provider failures)
 
 ---
@@ -241,7 +255,7 @@ For local development (React at `localhost:5173`, Django at `localhost:8000`):
   - responsive layout (mobile + desktop) with Split / List / Map view modes
   - cards list + interactive Leaflet map, linked by a shared selection
   - client-side pagination at 20 per page
-  - filters for ownership, emergency, 24/7
+  - server-side filters for ownership, emergency, 24/7, plus a notice when results are cut off
   - contact details (phone / website / email) plus Directions for every facility
   - colour-coded map markers with a legend, auto-fitted to results
   - loading skeletons, empty, and error states

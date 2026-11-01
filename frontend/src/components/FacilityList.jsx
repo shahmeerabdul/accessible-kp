@@ -1,4 +1,5 @@
 import { styleForType } from "../lib/facilityStyle.js";
+import { facilityTitle } from "../lib/facilityName.js";
 import { directionsUrl, normalizeUrl, telHref } from "../lib/contact.js";
 
 function Badge({ className, children }) {
@@ -218,7 +219,7 @@ export function FacilityList({
                 />
                 <div className="min-w-0 flex-1">
                   <h3 className="text-sm font-semibold leading-snug text-slate-100">
-                    {f.name || "Unnamed facility"}
+                    {facilityTitle(f)}
                   </h3>
                   {f.address && (
                     <p className="mt-0.5 text-[11px] text-slate-400">{f.address}</p>

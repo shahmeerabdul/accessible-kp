@@ -3,7 +3,6 @@ export const KPK_CITIES = [
   "Mardan",
   "Abbottabad",
   "Mingora",
-  "Swat",
   "Kohat",
   "Bannu",
   "Dera Ismail Khan",

@@ -73,6 +73,9 @@ USE_I18N = True
 
 USE_TZ = True
 
+# Let the browser frontend read these custom response headers (see FacilityListView).
+CORS_EXPOSE_HEADERS = ["X-Total-Count", "X-Upstream-Capped"]
+
 STATIC_URL = "static/"
 STATIC_ROOT = BASE_DIR / "staticfiles"
 

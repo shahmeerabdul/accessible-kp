@@ -95,7 +95,7 @@ export function Filters({
           onChange={(e) => setLimit(Number(e.target.value))}
           className="rounded-lg border border-slate-700/80 bg-slate-950/60 px-2.5 py-1.5 text-xs font-medium text-slate-200 outline-none transition hover:border-slate-600 focus:border-brand-500 focus:ring-2 focus:ring-brand-500/30"
         >
-          {[50, 100, 150, 200].map((v) => (
+          {[50, 100, 150, 200, 300, 500].map((v) => (
             <option key={v} value={v}>
               {v}
             </option>
