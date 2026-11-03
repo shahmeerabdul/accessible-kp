@@ -17,9 +17,14 @@ Data comes live from **OpenStreetMap** — via either the **healthsites.io** API
 - `backend/` – Django + DRF project
   - `backend/settings.py` – core Django/DRF, CORS, and cache configuration
   - `facilities/` – app that talks to the upstream provider and normalises facility data
+  - `Dockerfile`, `gunicorn.conf.py`, `requirements-prod.txt` – production server and image
 - `frontend/` – React + Vite + Tailwind single-page app
   - `src/components/` – `CitySelect`, `Filters`, `FacilityList`, `MapView`, `Pagination`
   - `src/lib/` – shared helpers: facility-type colours, contact/URL normalisation
+  - `Dockerfile`, `nginx.conf` – static-site image
+- `docker-compose.yml` – local stack: API + frontend + Redis
+- `deploy/` – AWS deployment guide (S3 + CloudFront, EC2), nginx and systemd examples
+- `.github/workflows/ci.yml` – CI: backend tests, frontend lint + build, Docker image builds
 
 ---
 
@@ -243,6 +248,50 @@ For local development (React at `localhost:5173`, Django at `localhost:8000`):
   ```
 
 Outside `DJANGO_DEBUG=true`, `CORS_ALLOWED_ORIGINS` is required and the app refuses to start without it.
+
+---
+
+### Development, testing and CI
+
+```bash
+# Backend (from backend/, with the virtualenv active)
+python manage.py test            # unit and API tests
+python manage.py check --deploy  # audit the production configuration (set the production env vars first)
+
+# Frontend (from frontend/)
+npm run lint                     # ESLint (React + hooks rules)
+npm run build
+```
+
+GitHub Actions (`.github/workflows/ci.yml`) runs the backend tests, the frontend lint and
+build, and builds both Docker images on every push to `main` and every pull request.
+
+**Health check:** `GET /api/health` returns `{"status": "ok"}`. It never calls an upstream
+provider and is not rate-limited, so it is safe for load balancers and uptime monitors.
+
+**Logging:** logs go to the console (`LOG_LEVEL`, default `INFO`). Upstream failures are logged
+by type only, never with request URLs, so the API key cannot end up in the logs.
+
+**Shared cache:** by default results are cached in each process's memory. Set `REDIS_URL`
+(e.g. an ElastiCache endpoint) to share one cache across gunicorn workers and servers. If the
+cache is unreachable the API keeps working (slower, with a logged warning).
+
+### Docker
+
+```bash
+cp backend/.env.example backend/.env    # put your HEALTHSITES_API_KEY in it
+docker compose up --build
+```
+
+Frontend at http://localhost:8080, API health at http://localhost:8000/api/health. The compose
+file also starts Redis and points the API at it. Secrets are never baked into the images
+(`.env` is excluded by `.dockerignore`); they are passed at runtime. The frontend image bakes in
+`VITE_API_BASE_URL` at build time (see the build arg in `docker-compose.yml`).
+
+### Deploying to AWS
+
+See [deploy/README.md](deploy/README.md) for the S3 + CloudFront (frontend) and EC2 (API)
+setup, including nginx and systemd examples, the production settings, and TLS.
 
 ---
 

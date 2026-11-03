@@ -1,0 +1,36 @@
+# Local stack: API + static frontend + a shared Redis cache.
+#
+#   cp backend/.env.example backend/.env     # then put your HEALTHSITES_API_KEY in it
+#   docker compose up --build
+#
+# Frontend: http://localhost:8080   API: http://localhost:8000/api/health
+services:
+  backend:
+    build: ./backend
+    env_file: ./backend/.env
+    environment:
+      # Use the Redis container for the cache instead of per-process memory.
+      REDIS_URL: redis://redis:6379/0
+    ports:
+      - "8000:8000"
+    depends_on:
+      - redis
+    healthcheck:
+      test: ["CMD", "python", "-c", "import urllib.request; urllib.request.urlopen('http://localhost:8000/api/health')"]
+      interval: 30s
+      timeout: 5s
+      retries: 3
+
+  frontend:
+    build:
+      context: ./frontend
+      args:
+        # Baked into the JavaScript at build time; must be reachable from the *browser*.
+        VITE_API_BASE_URL: ${VITE_API_BASE_URL:-http://localhost:8000}
+    ports:
+      - "8080:80"
+    depends_on:
+      - backend
+
+  redis:
+    image: redis:7-alpine

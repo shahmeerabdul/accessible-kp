@@ -1,0 +1,30 @@
+# /etc/systemd/system/accessible-kpk.service
+#
+#   sudo systemctl daemon-reload
+#   sudo systemctl enable --now accessible-kpk
+#   journalctl -u accessible-kpk -f        # logs
+
+[Unit]
+Description=Accessible KPK API (gunicorn)
+After=network.target
+
+[Service]
+User=accessible-kpk
+WorkingDirectory=/opt/accessible-kp/backend
+
+# Secrets and settings live here, not in the repo (see deploy/README.md).
+EnvironmentFile=/etc/accessible-kpk.env
+
+# Listen on localhost only: nginx is the single public entry point. This matters
+# because Django trusts nginx's X-Forwarded-Proto header.
+Environment=GUNICORN_BIND=127.0.0.1:8000
+
+ExecStart=/opt/accessible-kp/backend/.venv/bin/gunicorn -c gunicorn.conf.py backend.wsgi:application
+Restart=on-failure
+RestartSec=3
+
+NoNewPrivileges=true
+PrivateTmp=true
+
+[Install]
+WantedBy=multi-user.target

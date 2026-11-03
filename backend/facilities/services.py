@@ -491,7 +491,14 @@ def get_facilities_by_city(city: str) -> List[Dict[str, Any]]:
         raise FacilityProviderError("City name is required")
 
     cache_key = f"facilities:{FACILITIES_PROVIDER}:{city_clean.lower()}"
-    cached = cache.get(cache_key)
+
+    # A shared cache (Redis) can be unreachable. That must slow the API down
+    # (every request goes upstream), not take it down.
+    try:
+        cached = cache.get(cache_key)
+    except Exception as exc:
+        logger.warning("Cache read failed, fetching live: %s", type(exc).__name__)
+        cached = None
     if cached is not None:
         return cached
 
@@ -504,6 +511,9 @@ def get_facilities_by_city(city: str) -> List[Dict[str, Any]]:
             f"Unknown FACILITIES_PROVIDER '{FACILITIES_PROVIDER}' (expected 'healthsites' or 'overpass')"
         )
 
-    cache.set(cache_key, facilities, CACHE_TTL)
+    try:
+        cache.set(cache_key, facilities, CACHE_TTL)
+    except Exception as exc:
+        logger.warning("Cache write failed: %s", type(exc).__name__)
     return facilities
 

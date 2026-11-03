@@ -110,12 +110,38 @@ STATIC_ROOT = BASE_DIR / "staticfiles"
 
 DEFAULT_AUTO_FIELD = "django.db.models.BigAutoField"
 
-# Django cache framework - simple in-memory cache for city-based results
-CACHES = {
-    "default": {
-        "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
-        "LOCATION": "facilities-cache",
+# Cache for city results and the API throttle counters. In-memory by default,
+# which is per process: with several gunicorn workers each one keeps its own
+# copy. Set REDIS_URL (e.g. redis://localhost:6379/0, or an ElastiCache
+# endpoint) to share one cache across workers and servers.
+REDIS_URL = os.environ.get("REDIS_URL", "").strip()
+if REDIS_URL:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.redis.RedisCache",
+            "LOCATION": REDIS_URL,
+        }
     }
+else:
+    CACHES = {
+        "default": {
+            "BACKEND": "django.core.cache.backends.locmem.LocMemCache",
+            "LOCATION": "facilities-cache",
+        }
+    }
+
+# Log to stdout/stderr (collected by systemd, Docker or CloudWatch).
+LOG_LEVEL = os.environ.get("LOG_LEVEL", "").strip().upper() or "INFO"
+LOGGING = {
+    "version": 1,
+    "disable_existing_loggers": False,
+    "formatters": {
+        "plain": {"format": "%(asctime)s %(levelname)s %(name)s: %(message)s"},
+    },
+    "handlers": {
+        "console": {"class": "logging.StreamHandler", "formatter": "plain"},
+    },
+    "root": {"handlers": ["console"], "level": LOG_LEVEL},
 }
 
 # DRF basic config
@@ -126,7 +152,7 @@ REST_FRAMEWORK = {
     # Every uncached city/limit combination triggers an upstream call, so cap
     # how often a single client can hit the API. Uses the Django cache.
     "DEFAULT_THROTTLE_CLASSES": [
-        "rest_framework.throttling.AnonRateThrottle",
+        "facilities.throttling.FailOpenAnonRateThrottle",
     ],
     "DEFAULT_THROTTLE_RATES": {
         "anon": os.environ.get("API_THROTTLE_RATE", "60/min"),
@@ -149,4 +175,30 @@ else:
     raise ImproperlyConfigured(
         "CORS_ALLOWED_ORIGINS must list the frontend origin(s) when DJANGO_DEBUG is not true."
     )
+
+
+def env_bool(name: str, default: bool) -> bool:
+    return os.environ.get(name, str(default)).strip().lower() in {"1", "true", "yes", "on"}
+
+
+# HTTPS hardening, on whenever DEBUG is off (i.e. in production).
+if not DEBUG:
+    # nginx / an ALB terminates TLS and forwards plain HTTP, so Django has to
+    # trust X-Forwarded-Proto to know the original request was HTTPS. Only do
+    # that when the app is reachable *only* through that proxy; otherwise a
+    # client could fake the header. Set DJANGO_BEHIND_PROXY=false if Django is
+    # exposed directly.
+    if env_bool("DJANGO_BEHIND_PROXY", True):
+        SECURE_PROXY_SSL_HEADER = ("HTTP_X_FORWARDED_PROTO", "https")
+
+    SECURE_SSL_REDIRECT = env_bool("DJANGO_SECURE_SSL_REDIRECT", True)
+    # Load-balancer health checks usually speak plain HTTP; don't redirect them.
+    SECURE_REDIRECT_EXEMPT = [r"^api/health$"]
+
+    SESSION_COOKIE_SECURE = True
+    CSRF_COOKIE_SECURE = True
+
+    # Start small so a misconfiguration is recoverable; raise to 31536000 (one
+    # year) once HTTPS is confirmed to work everywhere.
+    SECURE_HSTS_SECONDS = int(os.environ.get("DJANGO_HSTS_SECONDS", "3600"))
 

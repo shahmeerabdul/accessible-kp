@@ -22,6 +22,20 @@ TRUE_VALUES = {"1", "true", "yes", "on"}
 FALSE_VALUES = {"", "0", "false", "no", "off"}
 
 
+class HealthView(APIView):
+    """
+    GET /api/health -- liveness check for load balancers and uptime monitors.
+
+    Deliberately cheap: it never calls an upstream provider, and it is exempt
+    from the API throttle so frequent health checks are not rate-limited.
+    """
+
+    throttle_classes: list = []
+
+    def get(self, request: Request, *args: Any, **kwargs: Any) -> Response:
+        return Response({"status": "ok"})
+
+
 def parse_bool(value: str | None) -> bool | None:
     """True/False for a recognised flag value, None if it isn't one."""
     if value is None:
