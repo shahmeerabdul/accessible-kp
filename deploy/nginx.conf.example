@@ -1,0 +1,39 @@
+# /etc/nginx/conf.d/accessible-kpk.conf  (EC2, in front of gunicorn)
+#
+# Replace api.example.com. Get the certificate with certbot, e.g.
+#   sudo certbot --nginx -d api.example.com
+# which fills in the ssl_certificate lines for you.
+
+server {
+    listen 80;
+    server_name api.example.com;
+
+    # Plain HTTP only redirects to HTTPS. (Django's /api/health is also exempt
+    # from its own redirect, so a load balancer can check it over HTTP.)
+    location / {
+        return 301 https://$host$request_uri;
+    }
+}
+
+server {
+    listen 443 ssl;
+    http2 on;
+    server_name api.example.com;
+
+    ssl_certificate     /etc/letsencrypt/live/api.example.com/fullchain.pem;
+    ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;
+
+    location / {
+        proxy_pass http://127.0.0.1:8000;
+
+        proxy_set_header Host              $host;
+        proxy_set_header X-Real-IP         $remote_addr;
+        proxy_set_header X-Forwarded-For   $proxy_add_x_forwarded_for;
+        # Django reads this to know the original request was HTTPS. nginx must
+        # *set* it (never pass the client's value through) -- this line does.
+        proxy_set_header X-Forwarded-Proto $scheme;
+
+        # A cold city can take a while: several sequential upstream calls.
+        proxy_read_timeout 130s;
+    }
+}
