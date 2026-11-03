@@ -278,6 +278,69 @@ def dedupe_facilities(facilities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return unique
 
 
+def clean_name(name: Any) -> str:
+    """
+    A usable display name, or "" if there isn't one. Some OSM records are
+    "named" with just a number or punctuation (e.g. "82", "-"), which is a
+    ref/placeholder, not a name; those are treated as unnamed.
+    """
+    name = " ".join(str(name or "").split())
+    return name if re.search(r"[^\W\d_]", name) else ""
+
+
+# Coarse groups for the `type` filter. Anything not listed is "other".
+TYPE_GROUPS = {
+    "Hospital": "hospital",
+    "Clinic": "clinic",
+    "BHU": "health_unit",
+    "RHC": "health_unit",
+    "Pharmacy": "pharmacy_lab",
+    "Laboratory": "pharmacy_lab",
+}
+TYPE_GROUP_VALUES = {"hospital", "clinic", "health_unit", "pharmacy_lab", "other"}
+
+
+def type_group(facility_type: str) -> str:
+    return TYPE_GROUPS.get(facility_type, "other")
+
+
+# Two facilities with the same name closer than this are one place mapped twice
+# (e.g. a building outline and a point inside it).
+DUPLICATE_DISTANCE_KM = 0.15
+
+
+def _completeness(facility: Dict[str, Any]) -> int:
+    """How much useful detail a record has; used to pick the best of two duplicates."""
+    text_fields = ("phone", "website", "email", "address", "ownership", "wheelchair")
+    score = sum(1 for key in text_fields if facility.get(key))
+    return score + sum(1 for key in ("is_24_7", "is_emergency") if facility.get(key) is not None)
+
+
+def merge_nearby_duplicates(facilities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Collapse records that are the same place mapped more than once: same name
+    (ignoring case) within DUPLICATE_DISTANCE_KM. The most complete record is
+    kept, in the position of the first one. Unnamed facilities are never merged.
+    """
+    result: List[Dict[str, Any]] = []
+    kept_by_name: Dict[str, List[int]] = {}
+    for facility in facilities:
+        key = (facility.get("name") or "").casefold()
+        if key:
+            for index in kept_by_name.get(key, []):
+                other = result[index]
+                if distance_km(facility["lat"], facility["lon"], other["lat"], other["lon"]) < DUPLICATE_DISTANCE_KM:
+                    if _completeness(facility) > _completeness(other):
+                        result[index] = facility
+                    break
+            else:
+                kept_by_name.setdefault(key, []).append(len(result))
+                result.append(facility)
+        else:
+            result.append(facility)
+    return result
+
+
 def normalize_element(element: Dict[str, Any]) -> Dict[str, Any]:
     tags = element.get("tags", {}) or {}
     lat = element.get("lat")
@@ -293,7 +356,7 @@ def normalize_element(element: Dict[str, Any]) -> Dict[str, Any]:
 
     facility = {
         "osm_id": make_osm_id(element.get("type"), element.get("id")),
-        "name": tags.get("name", ""),
+        "name": clean_name(tags.get("name", "")),
         "facility_type": infer_facility_type(tags),
         "address": build_address(tags),
         "phone": build_phone(tags),
@@ -400,7 +463,7 @@ def normalize_healthsites_record(record: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "osm_id": make_osm_id(record.get("osm_type"), record.get("osm_id")),
-        "name": tags.get("name", ""),
+        "name": clean_name(tags.get("name", "")),
         "facility_type": infer_facility_type(tags),
         "address": build_address(tags),
         "phone": tags.get("phone", ""),
@@ -508,12 +571,13 @@ def filter_facilities(
     open_24_7_only: bool = False,
     wheelchair_only: bool = False,
     query: str = "",
+    type_filter: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Keep only facilities matching every given filter (empty/False = no filter).
 
     `query` is a free-text search: every word must appear (case-insensitively)
-    in the facility's name or address.
+    in the facility's name or address. `type_filter` is one of TYPE_GROUP_VALUES.
     """
     words = query.casefold().split()
     return [
@@ -524,6 +588,7 @@ def filter_facilities(
         and (not open_24_7_only or f.get("is_24_7"))
         and (not wheelchair_only or f.get("wheelchair") == "yes")
         and (not words or _matches_query(f, words))
+        and (not type_filter or type_group(f.get("facility_type", "")) == type_filter)
     ]
 
 
@@ -593,6 +658,8 @@ def _load_facilities(cache_key: str, center: tuple[float, float]) -> List[Dict[s
         raise FacilityProviderError(
             f"Unknown FACILITIES_PROVIDER '{FACILITIES_PROVIDER}' (expected 'healthsites' or 'overpass')"
         )
+
+    facilities = merge_nearby_duplicates(facilities)
 
     try:
         cache.set(cache_key, facilities, CACHE_TTL)

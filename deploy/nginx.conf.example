@@ -4,9 +4,15 @@
 #   sudo certbot --nginx -d api.example.com
 # which fills in the ssl_certificate lines for you.
 
+# Privacy: "near me" requests carry the visitor's coordinates in the query
+# string. $uri is the path only, so this format never logs them (the default
+# "combined" format logs the full $request, query string included).
+log_format kpk_privacy '$remote_addr [$time_local] "$request_method $uri" $status $body_bytes_sent';
+
 server {
     listen 80;
     server_name api.example.com;
+    access_log /var/log/nginx/accessible-kpk.access.log kpk_privacy;
 
     # Plain HTTP only redirects to HTTPS. (Django's /api/health is also exempt
     # from its own redirect, so a load balancer can check it over HTTP.)
@@ -19,6 +25,7 @@ server {
     listen 443 ssl;
     http2 on;
     server_name api.example.com;
+    access_log /var/log/nginx/accessible-kpk.access.log kpk_privacy;
 
     ssl_certificate     /etc/letsencrypt/live/api.example.com/fullchain.pem;
     ssl_certificate_key /etc/letsencrypt/live/api.example.com/privkey.pem;

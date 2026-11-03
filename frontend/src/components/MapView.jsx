@@ -1,5 +1,5 @@
 import { useEffect, useMemo, useRef } from "react";
-import { MapContainer, TileLayer, Marker, Popup, useMap } from "react-leaflet";
+import { MapContainer, TileLayer, Marker, Popup, CircleMarker, Tooltip, useMap } from "react-leaflet";
 import L from "leaflet";
 import "leaflet/dist/leaflet.css";
 import { styleForType } from "../lib/facilityStyle.js";
@@ -45,7 +45,7 @@ function ResizeHandler() {
 }
 
 /** Fit the map to the current results, and fly to a facility when selected. */
-function MapController({ facilities, selected }) {
+function MapController({ facilities, selected, userLocation }) {
   const map = useMap();
   const lastFitKey = useRef("");
 
@@ -60,18 +60,28 @@ function MapController({ facilities, selected }) {
   useEffect(() => {
     if (selected || !facilities.length) return;
     // Only refit when the result set itself changes, not on every render.
-    const key = facilities.map((f) => f.osm_id).join(",");
+    const key =
+      facilities.map((f) => f.osm_id).join(",") +
+      (userLocation ? `|${userLocation.lat},${userLocation.lon}` : "");
     if (key === lastFitKey.current) return;
     lastFitKey.current = key;
 
-    const bounds = L.latLngBounds(facilities.map((f) => [f.lat, f.lon]));
-    map.fitBounds(bounds, { padding: [40, 40], maxZoom: 14 });
-  }, [map, facilities, selected]);
+    // Include the visitor's own position so "near me" results are shown around them.
+    const points = facilities.map((f) => [f.lat, f.lon]);
+    if (userLocation) points.push([userLocation.lat, userLocation.lon]);
+    map.fitBounds(L.latLngBounds(points), { padding: [40, 40], maxZoom: 14 });
+  }, [map, facilities, selected, userLocation]);
 
   return null;
 }
 
-export function MapView({ facilities, selectedId, onSelect }) {
+const WHEELCHAIR_TEXT = {
+  yes: "Wheelchair accessible",
+  limited: "Limited wheelchair access",
+  no: "Not wheelchair accessible",
+};
+
+export function MapView({ facilities, selectedId, onSelect, userLocation = null }) {
   const selected = useMemo(
     () => facilities.find((f) => f.osm_id === selectedId) || null,
     [facilities, selectedId]
@@ -91,7 +101,19 @@ export function MapView({ facilities, selectedId, onSelect }) {
           className="muted-tiles"
         />
         <ResizeHandler />
-        <MapController facilities={facilities} selected={selected} />
+        <MapController facilities={facilities} selected={selected} userLocation={userLocation} />
+
+        {userLocation && (
+          <CircleMarker
+            center={[userLocation.lat, userLocation.lon]}
+            radius={9}
+            pathOptions={{ color: "#ffffff", weight: 3, fillColor: "#1d4e89", fillOpacity: 1 }}
+          >
+            <Tooltip permanent direction="top" offset={[0, -8]}>
+              You are here
+            </Tooltip>
+          </CircleMarker>
+        )}
 
         {facilities.map((f) => {
           const style = styleForType(f.facility_type);
@@ -125,10 +147,11 @@ export function MapView({ facilities, selectedId, onSelect }) {
                       Directions
                     </a>
                   </div>
-                  {(f.is_emergency || f.is_24_7) && (
+                  {(f.is_emergency || f.is_24_7 || WHEELCHAIR_TEXT[f.wheelchair]) && (
                     <div className="font-bold">
                       {f.is_emergency && <div className="text-alert">Emergency services</div>}
                       {f.is_24_7 && <div className="text-brand">Open 24 hours</div>}
+                      {WHEELCHAIR_TEXT[f.wheelchair] && <div>{WHEELCHAIR_TEXT[f.wheelchair]}</div>}
                     </div>
                   )}
                 </div>

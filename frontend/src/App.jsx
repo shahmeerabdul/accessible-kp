@@ -1,13 +1,26 @@
 import { useEffect, useMemo, useState } from "react";
 import { CitySelect } from "./components/CitySelect.jsx";
 import { Filters } from "./components/Filters.jsx";
+import { LocationControl } from "./components/LocationControl.jsx";
+import { SearchBox } from "./components/SearchBox.jsx";
 import { FacilityList } from "./components/FacilityList.jsx";
 import { MapView } from "./components/MapView.jsx";
 import { Pagination } from "./components/Pagination.jsx";
 import { fetchFacilities } from "./api/client.js";
+import { describeGeolocationError, getCurrentCoordinates } from "./lib/geolocation.js";
+import { useDebouncedValue } from "./lib/useDebouncedValue.js";
 
 const DEFAULT_LIMIT = 150;
 const PAGE_SIZE = 20;
+
+const DEFAULT_FILTERS = {
+  ownership: "",
+  emergency: false,
+  open24: false,
+  wheelchair: false,
+  type: "",
+  sort: "",
+};
 
 const VIEWS = [
   { value: "split", label: "List and map" },
@@ -17,24 +30,48 @@ const VIEWS = [
 
 export default function App() {
   const [city, setCity] = useState("");
+  const [coords, setCoords] = useState(null); // { lat, lon } once the visitor shares their location
+  const [locating, setLocating] = useState(false);
+  const [locationError, setLocationError] = useState("");
+
+  const [searchText, setSearchText] = useState("");
+  const query = useDebouncedValue(searchText.trim(), 300);
+  const [filters, setFilters] = useState(DEFAULT_FILTERS);
   const [limit, setLimit] = useState(DEFAULT_LIMIT);
+  const [filtersOpen, setFiltersOpen] = useState(false); // only matters on small screens
+
   const [facilities, setFacilities] = useState([]);
-  // Matches on the server (can exceed facilities.length) and whether the city
+  // Matches on the server (can exceed facilities.length) and whether the area
   // hit the backend's fetch cap.
   const [total, setTotal] = useState(0);
   const [capped, setCapped] = useState(false);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState("");
 
-  const [ownership, setOwnership] = useState("");
-  const [emergencyOnly, setEmergencyOnly] = useState(false);
-  const [open24, setOpen24] = useState(false);
   const [selectedId, setSelectedId] = useState(null);
   const [page, setPage] = useState(1);
   const [view, setView] = useState("split");
 
+  const hasSearch = Boolean(city) || Boolean(coords);
+  const setFilter = (key, value) => setFilters((current) => ({ ...current, [key]: value }));
+  const activeFilterCount = Object.entries(filters).filter(
+    ([key, value]) => key !== "sort" && Boolean(value)
+  ).length;
+
+  async function locateMe() {
+    setLocating(true);
+    setLocationError("");
+    try {
+      setCoords(await getCurrentCoordinates());
+    } catch (err) {
+      setLocationError(describeGeolocationError(err));
+    } finally {
+      setLocating(false);
+    }
+  }
+
   useEffect(() => {
-    if (!city) {
+    if (!city && !coords) {
       setFacilities([]);
       setTotal(0);
       setCapped(false);
@@ -47,8 +84,19 @@ export default function App() {
     setError("");
     setSelectedId(null);
 
-    // Filters are applied by the backend, before the limit.
-    fetchFacilities({ city, limit, ownership, emergency: emergencyOnly, open24 })
+    // Filters, search and sorting are applied by the backend, before the limit.
+    fetchFacilities({
+      city,
+      coords,
+      limit,
+      ownership: filters.ownership,
+      emergency: filters.emergency,
+      open24: filters.open24,
+      wheelchair: filters.wheelchair,
+      type: filters.type,
+      sort: filters.sort,
+      query,
+    })
       .then((result) => {
         if (!cancelled) {
           setFacilities(result.facilities);
@@ -75,12 +123,12 @@ export default function App() {
     return () => {
       cancelled = true;
     };
-  }, [city, limit, ownership, emergencyOnly, open24]);
+  }, [city, coords, limit, filters, query]);
 
   // Any change to the result set should send the reader back to page 1.
   useEffect(() => {
     setPage(1);
-  }, [city, ownership, emergencyOnly, open24, limit]);
+  }, [city, coords, filters, query, limit]);
 
   const totalPages = Math.max(1, Math.ceil(facilities.length / PAGE_SIZE));
   const currentPage = Math.min(page, totalPages);
@@ -95,14 +143,18 @@ export default function App() {
       return `Showing the first ${facilities.length} of ${total} matches. Choose a higher number under "Show up to" to see more.`;
     }
     if (capped) {
-      return "This city reached the 500-facility limit, so more facilities may exist in OpenStreetMap.";
+      return "This area reached the 500-facility limit, so more facilities may exist in OpenStreetMap.";
     }
     return "";
   })();
 
   const showList = view !== "map";
   const showMap = view !== "list";
-  const hasResults = Boolean(city) && !loading && !error && facilities.length > 0;
+  const hasResults = hasSearch && !loading && !error && facilities.length > 0;
+
+  // Where `distance_km` is measured from, for the cards.
+  const distanceFrom = coords ? "from you" : `from the centre of ${city}`;
+  const heading = city ? `Facilities in ${city}` : coords ? "Facilities near you" : "Facilities";
 
   const gridCols =
     view === "split" ? "lg:grid-cols-[minmax(0,5fr)_minmax(0,7fr)]" : "lg:grid-cols-1";
@@ -125,7 +177,11 @@ export default function App() {
             </p>
           </div>
 
-          <div role="group" aria-label="Layout" className="flex overflow-hidden rounded-md border-2 border-ink">
+          <div
+            role="group"
+            aria-label="Layout"
+            className="flex overflow-hidden rounded-md border-2 border-ink"
+          >
             {VIEWS.map((v) => (
               <button
                 key={v.value}
@@ -148,19 +204,39 @@ export default function App() {
       <div className="flex min-w-0 flex-1 flex-col gap-4 p-4 lg:min-h-0 lg:flex-row">
         <aside
           aria-label="Search and filters"
-          className="flex w-full shrink-0 flex-col gap-6 rounded-lg border border-line bg-surface p-4 lg:w-[300px] lg:overflow-y-auto"
+          className="flex w-full shrink-0 flex-col gap-5 rounded-lg border border-line bg-surface p-4 lg:w-[300px] lg:overflow-y-auto"
         >
           <CitySelect value={city} onChange={setCity} />
-          <Filters
-            ownership={ownership}
-            setOwnership={setOwnership}
-            emergencyOnly={emergencyOnly}
-            setEmergencyOnly={setEmergencyOnly}
-            open24={open24}
-            setOpen24={setOpen24}
-            limit={limit}
-            setLimit={setLimit}
+          <LocationControl
+            active={Boolean(coords)}
+            locating={locating}
+            error={locationError}
+            onLocate={locateMe}
+            onClear={() => setCoords(null)}
           />
+          <SearchBox value={searchText} onChange={setSearchText} />
+
+          {/* On small screens the filters fold away so results are not pushed off-screen. */}
+          <button
+            type="button"
+            onClick={() => setFiltersOpen((open) => !open)}
+            aria-expanded={filtersOpen}
+            aria-controls="filters"
+            className="rounded-md border-2 border-ink bg-surface px-3 py-2.5 text-left text-base font-bold hover:bg-brand-tint lg:hidden"
+          >
+            {filtersOpen ? "Hide filters" : "Show filters"}
+            {activeFilterCount > 0 && ` (${activeFilterCount} active)`}
+          </button>
+          <div id="filters" className={filtersOpen ? "block" : "hidden lg:block"}>
+            <Filters
+              filters={filters}
+              setFilter={setFilter}
+              limit={limit}
+              setLimit={setLimit}
+              activeCount={activeFilterCount}
+              onReset={() => setFilters(DEFAULT_FILTERS)}
+            />
+          </div>
         </aside>
 
         <main className={`grid min-w-0 flex-1 gap-4 lg:min-h-0 ${gridCols}`}>
@@ -171,9 +247,7 @@ export default function App() {
               className="flex min-w-0 flex-col gap-3 lg:min-h-0"
             >
               <div className="shrink-0">
-                <h2 className="text-xl font-bold">
-                  {city ? `Facilities in ${city}` : "Facilities"}
-                </h2>
+                <h2 className="text-xl font-bold">{heading}</h2>
                 {hasResults && (
                   <p role="status" className="text-base text-ink-soft">
                     {total} {total === 1 ? "facility" : "facilities"} found
@@ -192,7 +266,9 @@ export default function App() {
                   facilities={pageItems}
                   loading={loading}
                   error={error}
-                  selectedCity={city}
+                  hasSearch={hasSearch}
+                  searchedText={query}
+                  distanceFrom={distanceFrom}
                   selectedId={selectedId}
                   onSelect={setSelectedId}
                   columns={view === "list" ? 3 : 1}
@@ -217,6 +293,7 @@ export default function App() {
                 facilities={pageItems}
                 selectedId={selectedId}
                 onSelect={setSelectedId}
+                userLocation={coords}
               />
             </section>
           )}

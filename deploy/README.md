@@ -101,6 +101,15 @@ safe if every request really comes through nginx/ALB, which overwrites that head
 gunicorn were reachable directly, a client could send a fake header. That is why the service
 file binds gunicorn to `127.0.0.1` and the security group never opens port 8000.
 
+### Visitor location privacy
+
+The "Use my location" feature sends the visitor's coordinates to the API as `?lat=…&lon=…`.
+The app does not store them, but web-server access logs normally record the full URL. Both
+shipped configs avoid that: gunicorn logs the path only (`gunicorn.conf.py`) and the nginx
+example uses a `$uri`-based `log_format`. Keep this if you change the logging, and be aware
+that CloudFront, an ALB or other layers in front of the API have their own access logs that
+can include query strings.
+
 If the cache (Redis) is unreachable the API keeps working: it skips the cache and the rate
 limiter allows requests, and logs a warning. It just calls the upstream API more often.
 

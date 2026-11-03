@@ -98,6 +98,7 @@ Data comes live from **OpenStreetMap** — via either the **healthsites.io** API
    | `emergency`, `open_24_7`, `wheelchair` | `true` to keep only facilities with that recorded |
    | `q` | Text search: every word must appear in the name or address (case-insensitive) |
    | `sort` | `name` (A–Z, unnamed last) or `distance` (nearest first) |
+   | `type` | `hospital`, `clinic`, `health_unit` (BHU/RHC), `pharmacy_lab` or `other` |
 
    `city` and `lat`/`lon` can be combined: the city is searched and distances are measured
    from the visitor. With `lat`/`lon` the default order is nearest first.
@@ -209,11 +210,19 @@ out as text.
   …). Defined once in `CITY_CENTERS` (`backend/facilities/services.py`) and mirrored in
   `frontend/src/constants/cities.js`; a test fails if the two drift apart. Chitral and Pattan
   also stand in for their neighbouring districts (Upper Chitral, Kolai-Palas).
-- **`Filters`** – ownership radio buttons (All / Government / Private), "Has emergency
-  services" and "Open 24 hours" checkboxes, and how many results to show
+- **`LocationControl`** – "Use my location" button (the browser asks for permission only
+  when it is clicked). The position is rounded to ~110 m before it is sent, shown on the map
+  as "You are here", and can be switched off again. Browsers only allow this on HTTPS (or
+  localhost).
+- **`SearchBox`** – search by name or address, debounced so it does not request on every key
+- **`Filters`** – type of facility, sort order (default / name / nearest), ownership radio
+  buttons, "Has emergency services", "Open 24 hours" and "Wheelchair accessible" checkboxes,
+  how many results to show, and "Clear all filters". On small screens this panel folds into a
+  "Show filters" button so results are not pushed off-screen
 - **`FacilityList`** – cards showing:
   - name, facility type, ownership and address
-  - "Emergency services" / "Open 24 hours" as plain text when known
+  - distance ("0.9 km from you", or from the city centre when sorting by distance)
+  - "Emergency services" / "Open 24 hours" / wheelchair access as plain text when known
   - a contact row: tap-to-call phone, website and email when present, plus a
     **Directions** link (available for every facility, since it only needs coordinates) and
     a **Show on map** button
@@ -225,9 +234,11 @@ out as text.
 
 The root `App` component:
 
-- Manages selected city, filters, result limit, view mode, pagination and selection
-- Calls `GET /api/facilities` via Axios with `city`, `limit` and the active filters
-  (filtering happens on the server, before the limit)
+- Manages selected city, the visitor's location, search text, filters, result limit, view
+  mode, pagination and selection
+- Calls `GET /api/facilities` via Axios with `city` and/or `lat`/`lon`, `limit`, the search
+  text and the active filters (filtering, search and sorting happen on the server, before
+  the limit)
 - Handles **loading** (skeletons), **error**, and **empty** states
 - Shows a notice when results are cut off (more matches than the limit, or the city hit
   the 500-facility fetch cap)
@@ -265,7 +276,10 @@ flies the map to that facility with an enlarged marker.
       otherwise left empty rather than guessed
     - `lat`, `lon`
   - Wraps low-level/network errors into a custom `FacilityProviderError`
-  - De-duplicates facilities by `osm_id` and provides `filter_facilities`
+  - De-duplicates facilities by `osm_id`, and merges records that are the same place mapped
+    twice (same name within 150 m, keeping the most complete one)
+  - Treats names that are only numbers or punctuation (e.g. "82") as unnamed
+  - Provides `filter_facilities`, text search, sorting, distance and the near-me grid snapping
   - Uses Django cache (`LocMemCache`) keyed by `(provider, city)` so switching
     providers doesn't serve stale results from the other one
 
@@ -349,7 +363,8 @@ setup, including nginx and systemd examples, the production settings, and TLS.
   - responsive layout (mobile + desktop) with List-and-map / List / Map view modes
   - cards list + interactive Leaflet map, linked by a shared selection
   - client-side pagination at 20 per page
-  - server-side filters for ownership, emergency, 24/7, plus a notice when results are cut off
+  - "Use my location" near-me search, name/address search, sorting, and server-side filters
+    (type, ownership, emergency, 24/7, wheelchair), plus a notice when results are cut off
   - contact details (phone / website / email) plus Directions for every facility
   - letter-marked map pins with a key, auto-fitted to results
   - loading skeletons, empty, and error states

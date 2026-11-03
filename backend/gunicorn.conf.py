@@ -14,3 +14,7 @@ timeout = int(os.environ.get("GUNICORN_TIMEOUT", "120"))
 # Log to stdout/stderr so systemd, Docker or CloudWatch collect it.
 accesslog = "-"
 errorlog = "-"
+
+# Privacy: "near me" requests carry the visitor's coordinates in the query
+# string (?lat=..&lon=..). Log the path only (%(U)s), never the query string.
+access_log_format = '%(h)s "%(m)s %(U)s" %(s)s %(b)s %(L)s'

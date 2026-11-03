@@ -4,6 +4,13 @@ import { directionsUrl, normalizeUrl, telHref } from "../lib/contact.js";
 
 const OWNERSHIP_LABELS = { government: "Government", private: "Private" };
 
+// Wheelchair access, from the OpenStreetMap `wheelchair` tag. Unknown shows nothing.
+const WHEELCHAIR_STATUS = {
+  yes: { text: "Wheelchair accessible", className: "text-brand" },
+  limited: { text: "Limited wheelchair access", className: "text-ink" },
+  no: { text: "Not wheelchair accessible", className: "text-alert" },
+};
+
 const LINK = "font-bold text-brand underline underline-offset-2 hover:text-brand-dark";
 
 function ContactRow({ facility, isSelected, onSelect }) {
@@ -83,16 +90,18 @@ export function FacilityList({
   facilities,
   loading,
   error,
-  selectedCity,
+  hasSearch,
+  searchedText = "",
+  distanceFrom = "",
   selectedId,
   onSelect,
   columns = 1,
 }) {
-  if (!selectedCity) {
+  if (!hasSearch) {
     return (
       <Message
-        title="Choose a city to begin"
-        hint="Pick a city or town on the left to see hospitals, clinics and health units nearby."
+        title="Choose a city or use your location"
+        hint="Pick a city or town, or share your location, to see hospitals, clinics and health units nearby."
       />
     );
   }
@@ -100,14 +109,24 @@ export function FacilityList({
   if (loading) return <Skeleton />;
 
   if (error) {
+    // A visitor outside KPK is not a failure; say so plainly. (The API's message
+    // for this case contains "outside the supported".)
+    if (error.includes("outside the supported")) {
+      return (
+        <Message
+          title="Your location is outside Khyber Pakhtunkhwa"
+          hint="This site only covers Khyber Pakhtunkhwa. Choose a city instead, or stop using your location."
+        />
+      );
+    }
     return <Message alert title="We couldn't load the facilities" hint={error} />;
   }
 
   if (!facilities.length) {
     return (
       <Message
-        title={`Nothing found in ${selectedCity}`}
-        hint="Try removing a filter. OpenStreetMap may not have every facility here."
+        title={searchedText ? `Nothing found for "${searchedText}"` : "Nothing found"}
+        hint="Try a different search or remove a filter. OpenStreetMap may not have every facility here."
       />
     );
   }
@@ -121,6 +140,7 @@ export function FacilityList({
       {facilities.map((f) => {
         const isSelected = selectedId === f.osm_id;
         const details = [f.facility_type, OWNERSHIP_LABELS[f.ownership]].filter(Boolean);
+        const wheelchair = WHEELCHAIR_STATUS[f.wheelchair];
         return (
           <li key={f.osm_id}>
             <article
@@ -139,10 +159,16 @@ export function FacilityList({
                     <p className="text-base text-ink-soft">{details.join(" · ")}</p>
                   )}
                   {f.address && <p className="mt-1 text-base">{f.address}</p>}
-                  {(f.is_emergency || f.is_24_7) && (
+                  {f.distance_km != null && (
+                    <p className="mt-1 text-base">
+                      <strong>{f.distance_km} km</strong> {distanceFrom}
+                    </p>
+                  )}
+                  {(f.is_emergency || f.is_24_7 || wheelchair) && (
                     <ul className="mt-2 space-y-0.5 text-base font-bold">
                       {f.is_emergency && <li className="text-alert">Emergency services</li>}
                       {f.is_24_7 && <li className="text-brand">Open 24 hours</li>}
+                      {wheelchair && <li className={wheelchair.className}>{wheelchair.text}</li>}
                     </ul>
                   )}
                   <div onClick={(e) => e.stopPropagation()}>

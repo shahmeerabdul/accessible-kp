@@ -11,6 +11,7 @@ from rest_framework.views import APIView
 from .serializers import FacilitySerializer
 from .services import (
     FETCH_CAP,
+    TYPE_GROUP_VALUES,
     FacilityProviderError,
     filter_facilities,
     get_city_center,
@@ -82,6 +83,7 @@ class FacilityListView(APIView):
     GET /api/facilities?city=<city_name>            (or ?lat=<float>&lon=<float> for "near me")
         [&limit=<int>][&ownership=government|private][&emergency=true]
         [&open_24_7=true][&wheelchair=true][&q=<text>][&sort=name|distance]
+        [&type=hospital|clinic|health_unit|pharmacy_lab|other]
 
     Returns normalized healthcare facilities in Khyber Pakhtunkhwa, fetched
     from the configured provider (healthsites.io or Overpass).
@@ -157,6 +159,13 @@ class FacilityListView(APIView):
                 status=status.HTTP_400_BAD_REQUEST,
             )
 
+        type_filter = (params.get("type") or "").strip().lower()
+        if type_filter and type_filter not in TYPE_GROUP_VALUES:
+            return Response(
+                {"detail": "Query parameter 'type' must be one of: " + ", ".join(sorted(TYPE_GROUP_VALUES)) + "."},
+                status=status.HTTP_400_BAD_REQUEST,
+            )
+
         query = " ".join((params.get("q") or "").split())[:MAX_QUERY_LENGTH]
 
         try:
@@ -177,6 +186,7 @@ class FacilityListView(APIView):
             open_24_7_only=open_24_7_only,
             wheelchair_only=wheelchair_only,
             query=query,
+            type_filter=type_filter,
         )
 
         # Distance is measured from the visitor if we know where they are,
