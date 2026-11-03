@@ -86,23 +86,42 @@ Data comes live from **OpenStreetMap** — via either the **healthsites.io** API
 
 6. **API endpoint**
 
-   - `GET /api/facilities?city=<city_name>&limit=<int>`
-     optionally with `&ownership=government|private`, `&emergency=true`, `&open_24_7=true`
+   - `GET /api/facilities?city=<city_name>` — facilities in a KPK city, or
+   - `GET /api/facilities?lat=<float>&lon=<float>` — **near me**: facilities around a location
 
-   Example:
+   Optional parameters:
+
+   | Parameter | Meaning |
+   |---|---|
+   | `limit` | Max results, `1…500` (default `500`) |
+   | `ownership` | `government` or `private` |
+   | `emergency`, `open_24_7`, `wheelchair` | `true` to keep only facilities with that recorded |
+   | `q` | Text search: every word must appear in the name or address (case-insensitive) |
+   | `sort` | `name` (A–Z, unnamed last) or `distance` (nearest first) |
+
+   `city` and `lat`/`lon` can be combined: the city is searched and distances are measured
+   from the visitor. With `lat`/`lon` the default order is nearest first.
+
+   Examples:
 
    ```bash
    curl "http://localhost:8000/api/facilities?city=Peshawar&limit=100&emergency=true"
+   curl "http://localhost:8000/api/facilities?lat=34.0151&lon=71.5249&limit=20"      # near me
+   curl "http://localhost:8000/api/facilities?city=Peshawar&q=hospital&sort=name"
    ```
 
    The backend:
 
    - Validates `city` against the supported KPK list (unknown cities get a `400`)
+   - Validates `lat`/`lon`: both required together, real numbers, and inside the Khyber
+     Pakhtunkhwa area (anything else gets a `400`)
    - Fetches up to 500 facilities for the city (`FETCH_CAP`), de-duplicated, and caches that
-     once per `(provider, city)` using Django's `LocMemCache`
-   - Applies the filters to **all** fetched facilities, *then* clamps to `limit`
-     (`1…500`, default `500`) — so a filter never misses matches beyond the first `limit`
-   - Rejects bad `ownership` / `emergency` / `open_24_7` values with a `400`
+     once per `(provider, city)` using Django's `LocMemCache`. For near-me searches the
+     location is snapped to a ~5 km grid first, so the number of upstream calls and cache
+     entries stays bounded however many different GPS readings arrive
+   - Applies the filters and the text search to **all** fetched facilities, *then* sorts, *then*
+     clamps to `limit` — so a filter never misses matches beyond the first `limit`
+   - Rejects bad `ownership` / `emergency` / `open_24_7` / `wheelchair` / `sort` values with a `400`
    - Normalises results into a consistent facility shape regardless of provider
    - Returns JSON via DRF serializer, plus two response headers:
      - `X-Total-Count` – facilities matching the filters (can be larger than the array returned)
@@ -122,7 +141,9 @@ Data comes live from **OpenStreetMap** — via either the **healthsites.io** API
        "email": "",
        "is_24_7": null,
        "is_emergency": true,
+       "wheelchair": "",
        "ownership": "",
+       "distance_km": null,
        "lat": 34.0034083,
        "lon": 71.5427023
      }
@@ -130,7 +151,14 @@ Data comes live from **OpenStreetMap** — via either the **healthsites.io** API
    ```
 
    `is_24_7` / `is_emergency` are `true`, `false`, or `null` when OSM records nothing.
-   Empty strings mean the tag is absent upstream.
+   Empty strings mean the tag is absent upstream. `wheelchair` is `"yes"`, `"limited"`,
+   `"no"` or `""` (unknown). `distance_km` is the distance from the visitor (or from the
+   city centre when `sort=distance`), and `null` when no reference point is known.
+
+   **Accessibility data is thin.** `wheelchair` comes from the OpenStreetMap `wheelchair` tag.
+   The healthsites.io responses checked so far do not include it (0 of 117 Peshawar
+   facilities had it), so it is mostly filled in only when `FACILITIES_PROVIDER=overpass`, and
+   only where OSM volunteers have mapped it.
 
 ---
 
@@ -300,7 +328,7 @@ setup, including nginx and systemd examples, the production settings, and TLS.
 - KPK‑only city dropdown, validated server-side as well as in the UI
 - Facilities fetched dynamically from OSM data, **not hard-coded**
 - Two interchangeable upstream providers (healthsites.io / Overpass)
-- REST endpoint: `GET /api/facilities?city=<city_name>&limit=<int>`
+- REST endpoint: `GET /api/facilities` by city or by location, with filters, text search and sorting
 - Basic in‑memory caching via Django cache framework (`LocMemCache`)
 - React SPA with:
   - responsive layout (mobile + desktop) with Split / List / Map view modes

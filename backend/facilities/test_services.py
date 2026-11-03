@@ -51,7 +51,7 @@ class FacilityTypeTests(SimpleTestCase):
         self.assertEqual(infer_facility_type({"name": "Sarhcare Clinic", "amenity": "clinic"}), "Clinic")
 
     def test_overpass_query_fetches_healthcare_doctor(self):
-        query = build_overpass_query("Peshawar")
+        query = build_overpass_query((34.0151, 71.5249))
         self.assertIn("hospital|clinic|centre|doctor", query)
         self.assertIn(f"out center {FETCH_CAP};", query)
 

@@ -95,14 +95,11 @@ class FacilityProviderError(Exception):
     """
 
 
-def build_overpass_query(city: str, limit: int | None = FETCH_CAP) -> str:
+def build_overpass_query(center: tuple[float, float], limit: int | None = FETCH_CAP) -> str:
     """
-    Build an Overpass QL query to fetch healthcare facilities near the given
-    city's center point.
+    Build an Overpass QL query to fetch healthcare facilities within
+    CITY_SEARCH_RADIUS_METERS of a (lat, lon) point.
     """
-    center = get_city_center(city)
-    if center is None:
-        raise FacilityProviderError(f"No known coordinates for city '{city}'")
     lat, lon = center
     radius = CITY_SEARCH_RADIUS_METERS
 
@@ -205,6 +202,20 @@ def infer_is_emergency(tags: Dict[str, Any]) -> bool | None:
     return None
 
 
+def infer_wheelchair(tags: Dict[str, Any]) -> str:
+    """
+    Wheelchair accessibility from the OSM `wheelchair` tag: "yes", "limited",
+    "no", or "" when unknown. (`designated` means built specifically for
+    wheelchair users, so it counts as "yes".)
+    """
+    value = str(tags.get("wheelchair", "")).strip().lower()
+    if value in {"yes", "designated"}:
+        return "yes"
+    if value in {"limited", "no"}:
+        return value
+    return ""
+
+
 def build_phone(tags: Dict[str, Any]) -> str:
     for key in ("phone", "contact:phone", "contact:mobile", "phone:mobile", "mobile"):
         value = tags.get(key)
@@ -269,6 +280,7 @@ def normalize_element(element: Dict[str, Any]) -> Dict[str, Any]:
         "email": tags.get("email") or tags.get("contact:email") or "",
         "is_24_7": infer_is_24_7(tags),
         "is_emergency": infer_is_emergency(tags),
+        "wheelchair": infer_wheelchair(tags),
         "ownership": infer_ownership(tags),
         "lat": lat,
         "lon": lon,
@@ -276,8 +288,8 @@ def normalize_element(element: Dict[str, Any]) -> Dict[str, Any]:
     return facility
 
 
-def fetch_facilities_from_overpass(city: str) -> List[Dict[str, Any]]:
-    query = build_overpass_query(city, FETCH_CAP)
+def fetch_facilities_from_overpass(center: tuple[float, float]) -> List[Dict[str, Any]]:
+    query = build_overpass_query(center, FETCH_CAP)
 
     try:
         response = requests.post(
@@ -338,6 +350,9 @@ def healthsites_attrs_to_tags(attrs: Dict[str, Any]) -> Dict[str, str]:
         "contact_email": "email",
         "opening_hours": "opening_hours",
         "emergency": "emergency",
+        # Not present in the healthsites responses checked so far (so accessibility
+        # data mostly comes from the Overpass provider); mapped in case it appears.
+        "wheelchair": "wheelchair",
         "addr_housenumber": "addr:housenumber",
         "addr_street": "addr:street",
         "addr_city": "addr:city",
@@ -372,23 +387,20 @@ def normalize_healthsites_record(record: Dict[str, Any]) -> Dict[str, Any]:
         "email": tags.get("email", ""),
         "is_24_7": infer_is_24_7(tags),
         "is_emergency": infer_is_emergency(tags),
+        "wheelchair": infer_wheelchair(tags),
         "ownership": infer_ownership(tags),
         "lat": lat,
         "lon": lon,
     }
 
 
-def fetch_facilities_from_healthsites(city: str) -> List[Dict[str, Any]]:
+def fetch_facilities_from_healthsites(center: tuple[float, float]) -> List[Dict[str, Any]]:
     if not HEALTHSITES_API_KEY:
         raise FacilityProviderError(
             "HEALTHSITES_API_KEY is not set. Sign in at https://healthsites.io/ with an "
             "OpenStreetMap account, generate an API key on your profile page, and add it "
             "to backend/.env as HEALTHSITES_API_KEY."
         )
-
-    center = get_city_center(city)
-    if center is None:
-        raise FacilityProviderError(f"No known coordinates for city '{city}'")
 
     lat, lon = center
     min_lng, min_lat, max_lng, max_lat = build_bbox(lat, lon, CITY_SEARCH_RADIUS_METERS)
@@ -462,20 +474,110 @@ def fetch_facilities_from_healthsites(city: str) -> List[Dict[str, Any]]:
     return facilities[:target]
 
 
+def _matches_query(facility: Dict[str, Any], words: List[str]) -> bool:
+    """True if every search word appears in the facility's name or address."""
+    haystack = f"{facility.get('name', '')} {facility.get('address', '')}".casefold()
+    return all(word in haystack for word in words)
+
+
 def filter_facilities(
     facilities: List[Dict[str, Any]],
     ownership: str = "",
     emergency_only: bool = False,
     open_24_7_only: bool = False,
+    wheelchair_only: bool = False,
+    query: str = "",
 ) -> List[Dict[str, Any]]:
-    """Keep only facilities matching every given filter (empty/False = no filter)."""
+    """
+    Keep only facilities matching every given filter (empty/False = no filter).
+
+    `query` is a free-text search: every word must appear (case-insensitively)
+    in the facility's name or address.
+    """
+    words = query.casefold().split()
     return [
         f
         for f in facilities
         if (not ownership or f.get("ownership") == ownership)
         and (not emergency_only or f.get("is_emergency"))
         and (not open_24_7_only or f.get("is_24_7"))
+        and (not wheelchair_only or f.get("wheelchair") == "yes")
+        and (not words or _matches_query(f, words))
     ]
+
+
+def distance_km(lat1: float, lon1: float, lat2: float, lon2: float) -> float:
+    """Great-circle distance in kilometres (haversine)."""
+    dlat = math.radians(lat2 - lat1)
+    dlon = math.radians(lon2 - lon1)
+    a = math.sin(dlat / 2) ** 2 + math.cos(math.radians(lat1)) * math.cos(math.radians(lat2)) * math.sin(dlon / 2) ** 2
+    return 6371.0 * 2 * math.asin(math.sqrt(a))
+
+
+def with_distance(facilities: List[Dict[str, Any]], lat: float, lon: float) -> List[Dict[str, Any]]:
+    """Copies of the facilities with `distance_km` (from lat/lon) added. Never mutates the cached list."""
+    return [{**f, "distance_km": round(distance_km(lat, lon, f["lat"], f["lon"]), 1)} for f in facilities]
+
+
+def sort_facilities(facilities: List[Dict[str, Any]], sort: str) -> List[Dict[str, Any]]:
+    """
+    Order facilities by "name" (A-Z, unnamed last) or "distance" (nearest first;
+    needs `distance_km`, see with_distance). Any other value keeps provider order.
+    """
+    if sort == "name":
+        return sorted(facilities, key=lambda f: (not f.get("name"), (f.get("name") or "").casefold()))
+    if sort == "distance":
+        return sorted(facilities, key=lambda f: f["distance_km"])
+    return list(facilities)
+
+
+# Rough bounding box of Khyber Pakhtunkhwa (lat_min, lat_max, lon_min, lon_max).
+KPK_BOUNDS = (31.0, 36.9, 69.0, 74.2)
+
+# "Near me" coordinates are snapped to this grid (degrees, ~5.5 km) before
+# fetching. Without it every distinct GPS reading would be a separate upstream
+# call and cache entry; with it the number of cache keys is bounded.
+NEAR_ME_GRID_DEGREES = 0.05
+
+
+def is_in_kpk_area(lat: float, lon: float) -> bool:
+    lat_min, lat_max, lon_min, lon_max = KPK_BOUNDS
+    return lat_min <= lat <= lat_max and lon_min <= lon <= lon_max
+
+
+def snap_to_grid(lat: float, lon: float) -> tuple[float, float]:
+    def snap(value: float) -> float:
+        return round(round(value / NEAR_ME_GRID_DEGREES) * NEAR_ME_GRID_DEGREES, 3)
+
+    return snap(lat), snap(lon)
+
+
+def _load_facilities(cache_key: str, center: tuple[float, float]) -> List[Dict[str, Any]]:
+    """Return the cached facilities for `cache_key`, fetching them around `center` on a miss."""
+    # A shared cache (Redis) can be unreachable. That must slow the API down
+    # (every request goes upstream), not take it down.
+    try:
+        cached = cache.get(cache_key)
+    except Exception as exc:
+        logger.warning("Cache read failed, fetching live: %s", type(exc).__name__)
+        cached = None
+    if cached is not None:
+        return cached
+
+    if FACILITIES_PROVIDER == "healthsites":
+        facilities = fetch_facilities_from_healthsites(center)
+    elif FACILITIES_PROVIDER == "overpass":
+        facilities = fetch_facilities_from_overpass(center)
+    else:
+        raise FacilityProviderError(
+            f"Unknown FACILITIES_PROVIDER '{FACILITIES_PROVIDER}' (expected 'healthsites' or 'overpass')"
+        )
+
+    try:
+        cache.set(cache_key, facilities, CACHE_TTL)
+    except Exception as exc:
+        logger.warning("Cache write failed: %s", type(exc).__name__)
+    return facilities
 
 
 def get_facilities_by_city(city: str) -> List[Dict[str, Any]]:
@@ -490,30 +592,18 @@ def get_facilities_by_city(city: str) -> List[Dict[str, Any]]:
     if not city_clean:
         raise FacilityProviderError("City name is required")
 
-    cache_key = f"facilities:{FACILITIES_PROVIDER}:{city_clean.lower()}"
+    center = get_city_center(city_clean)
+    if center is None:
+        raise FacilityProviderError(f"No known coordinates for city '{city_clean}'")
 
-    # A shared cache (Redis) can be unreachable. That must slow the API down
-    # (every request goes upstream), not take it down.
-    try:
-        cached = cache.get(cache_key)
-    except Exception as exc:
-        logger.warning("Cache read failed, fetching live: %s", type(exc).__name__)
-        cached = None
-    if cached is not None:
-        return cached
+    return _load_facilities(f"facilities:{FACILITIES_PROVIDER}:{city_clean.lower()}", center)
 
-    if FACILITIES_PROVIDER == "healthsites":
-        facilities = fetch_facilities_from_healthsites(city_clean)
-    elif FACILITIES_PROVIDER == "overpass":
-        facilities = fetch_facilities_from_overpass(city_clean)
-    else:
-        raise FacilityProviderError(
-            f"Unknown FACILITIES_PROVIDER '{FACILITIES_PROVIDER}' (expected 'healthsites' or 'overpass')"
-        )
 
-    try:
-        cache.set(cache_key, facilities, CACHE_TTL)
-    except Exception as exc:
-        logger.warning("Cache write failed: %s", type(exc).__name__)
-    return facilities
+def get_facilities_near(lat: float, lon: float) -> List[Dict[str, Any]]:
+    """
+    Facilities around an arbitrary point (a visitor's location), within
+    CITY_SEARCH_RADIUS_METERS of the grid cell the point falls in. Cached per cell.
+    """
+    center = snap_to_grid(lat, lon)
+    return _load_facilities(f"facilities:{FACILITIES_PROVIDER}:near:{center[0]}:{center[1]}", center)
 
