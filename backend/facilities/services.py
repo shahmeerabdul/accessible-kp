@@ -45,35 +45,56 @@ OVERPASS_USER_AGENT = os.environ.get(
 # exact match (e.g. "Peshawar City Tehsil"). Matching on `area["name"=city]`
 # therefore never resolves and silently returns zero results. Searching by
 # radius around a known point sidesteps that tagging inconsistency entirely.
-CITY_COORDINATES: Dict[str, tuple[float, float]] = {
-    "peshawar": (34.0151, 71.5249),
-    "mardan": (34.1986, 72.0404),
-    "abbottabad": (34.1463, 73.2117),
-    "mingora": (34.7717, 72.3604),
-    "kohat": (33.5900, 71.4400),
-    "bannu": (32.9853, 70.6027),
-    "dera ismail khan": (31.8313, 70.9022),
-    "charsadda": (34.1520, 71.7380),
-    "nowshera": (34.0158, 71.9761),
-    "haripur": (33.9964, 72.9337),
-    "mansehra": (34.3329, 73.1997),
+#
+# The main town of each KPK district. Coordinates for the newer entries were
+# looked up in OpenStreetMap (Nominatim) and checked against the district named
+# in the result. Keep this in sync with frontend/src/constants/cities.js (a test
+# enforces it) and keep entries more than a few km apart, or two options would
+# return almost the same facilities.
+CITY_CENTERS: Dict[str, tuple[float, float]] = {
+    "Abbottabad": (34.1463, 73.2117),
+    "Alpuri": (34.9204, 72.6326),  # Shangla
+    "Bannu": (32.9853, 70.6027),
+    "Batkhela": (34.6134, 71.9677),  # Malakand
+    "Battagram": (34.6786, 73.0281),
+    "Charsadda": (34.1520, 71.7380),
+    "Chitral": (35.8509, 71.7902),
+    "Daggar": (34.5106, 72.4849),  # Buner
+    "Dassu": (35.2686, 73.2240),  # Upper Kohistan
+    "Dera Ismail Khan": (31.8313, 70.9022),
+    "Dir": (35.2080, 71.8780),  # Upper Dir
+    "Ghalanai": (34.3230, 71.3996),  # Mohmand
+    "Hangu": (33.5280, 71.0575),
+    "Haripur": (33.9964, 72.9337),
+    "Judba": (34.6124, 72.7890),  # Torghar
+    "Kalaya": (33.7475, 70.9621),  # Orakzai
+    "Karak": (33.1160, 71.0951),
+    "Khar": (34.7350, 71.5251),  # Bajaur
+    "Kohat": (33.5900, 71.4400),
+    "Lakki Marwat": (32.6057, 70.9114),
+    "Landi Kotal": (34.0937, 71.1466),  # Khyber
+    "Mansehra": (34.3329, 73.1997),
+    "Mardan": (34.1986, 72.0404),
+    "Mingora": (34.7717, 72.3604),  # Swat
+    "Miranshah": (33.0018, 70.0671),  # North Waziristan
+    "Nowshera": (34.0158, 71.9761),
+    "Parachinar": (33.8968, 70.1001),  # Kurram
+    "Pattan": (35.1102, 73.0052),  # Lower Kohistan (also covers Kolai-Palas)
+    "Peshawar": (34.0151, 71.5249),
+    "Sararogha": (32.5131, 70.0263),  # South Waziristan
+    "Swabi": (34.1262, 72.4743),
+    "Tank": (32.2097, 70.3881),
+    "Timergara": (34.8291, 71.8427),  # Lower Dir
+    "Wana": (32.3074, 69.5907),  # South Waziristan
 }
 
-SUPPORTED_CITIES = [
-    "Peshawar",
-    "Mardan",
-    "Abbottabad",
-    "Mingora",
-    "Kohat",
-    "Bannu",
-    "Dera Ismail Khan",
-    "Charsadda",
-    "Nowshera",
-    "Haripur",
-    "Mansehra",
-]
+SUPPORTED_CITIES = sorted(CITY_CENTERS)
 
-SUPPORTED_CITIES_LOWER = {c.lower() for c in SUPPORTED_CITIES}
+CITY_COORDINATES: Dict[str, tuple[float, float]] = {
+    name.lower(): center for name, center in CITY_CENTERS.items()
+}
+
+SUPPORTED_CITIES_LOWER = set(CITY_COORDINATES)
 
 
 def is_supported_city(city: str) -> bool:
@@ -257,6 +278,69 @@ def dedupe_facilities(facilities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
     return unique
 
 
+def clean_name(name: Any) -> str:
+    """
+    A usable display name, or "" if there isn't one. Some OSM records are
+    "named" with just a number or punctuation (e.g. "82", "-"), which is a
+    ref/placeholder, not a name; those are treated as unnamed.
+    """
+    name = " ".join(str(name or "").split())
+    return name if re.search(r"[^\W\d_]", name) else ""
+
+
+# Coarse groups for the `type` filter. Anything not listed is "other".
+TYPE_GROUPS = {
+    "Hospital": "hospital",
+    "Clinic": "clinic",
+    "BHU": "health_unit",
+    "RHC": "health_unit",
+    "Pharmacy": "pharmacy_lab",
+    "Laboratory": "pharmacy_lab",
+}
+TYPE_GROUP_VALUES = {"hospital", "clinic", "health_unit", "pharmacy_lab", "other"}
+
+
+def type_group(facility_type: str) -> str:
+    return TYPE_GROUPS.get(facility_type, "other")
+
+
+# Two facilities with the same name closer than this are one place mapped twice
+# (e.g. a building outline and a point inside it).
+DUPLICATE_DISTANCE_KM = 0.15
+
+
+def _completeness(facility: Dict[str, Any]) -> int:
+    """How much useful detail a record has; used to pick the best of two duplicates."""
+    text_fields = ("phone", "website", "email", "address", "ownership", "wheelchair")
+    score = sum(1 for key in text_fields if facility.get(key))
+    return score + sum(1 for key in ("is_24_7", "is_emergency") if facility.get(key) is not None)
+
+
+def merge_nearby_duplicates(facilities: List[Dict[str, Any]]) -> List[Dict[str, Any]]:
+    """
+    Collapse records that are the same place mapped more than once: same name
+    (ignoring case) within DUPLICATE_DISTANCE_KM. The most complete record is
+    kept, in the position of the first one. Unnamed facilities are never merged.
+    """
+    result: List[Dict[str, Any]] = []
+    kept_by_name: Dict[str, List[int]] = {}
+    for facility in facilities:
+        key = (facility.get("name") or "").casefold()
+        if key:
+            for index in kept_by_name.get(key, []):
+                other = result[index]
+                if distance_km(facility["lat"], facility["lon"], other["lat"], other["lon"]) < DUPLICATE_DISTANCE_KM:
+                    if _completeness(facility) > _completeness(other):
+                        result[index] = facility
+                    break
+            else:
+                kept_by_name.setdefault(key, []).append(len(result))
+                result.append(facility)
+        else:
+            result.append(facility)
+    return result
+
+
 def normalize_element(element: Dict[str, Any]) -> Dict[str, Any]:
     tags = element.get("tags", {}) or {}
     lat = element.get("lat")
@@ -272,7 +356,7 @@ def normalize_element(element: Dict[str, Any]) -> Dict[str, Any]:
 
     facility = {
         "osm_id": make_osm_id(element.get("type"), element.get("id")),
-        "name": tags.get("name", ""),
+        "name": clean_name(tags.get("name", "")),
         "facility_type": infer_facility_type(tags),
         "address": build_address(tags),
         "phone": build_phone(tags),
@@ -379,7 +463,7 @@ def normalize_healthsites_record(record: Dict[str, Any]) -> Dict[str, Any]:
 
     return {
         "osm_id": make_osm_id(record.get("osm_type"), record.get("osm_id")),
-        "name": tags.get("name", ""),
+        "name": clean_name(tags.get("name", "")),
         "facility_type": infer_facility_type(tags),
         "address": build_address(tags),
         "phone": tags.get("phone", ""),
@@ -487,12 +571,13 @@ def filter_facilities(
     open_24_7_only: bool = False,
     wheelchair_only: bool = False,
     query: str = "",
+    type_filter: str = "",
 ) -> List[Dict[str, Any]]:
     """
     Keep only facilities matching every given filter (empty/False = no filter).
 
     `query` is a free-text search: every word must appear (case-insensitively)
-    in the facility's name or address.
+    in the facility's name or address. `type_filter` is one of TYPE_GROUP_VALUES.
     """
     words = query.casefold().split()
     return [
@@ -503,6 +588,7 @@ def filter_facilities(
         and (not open_24_7_only or f.get("is_24_7"))
         and (not wheelchair_only or f.get("wheelchair") == "yes")
         and (not words or _matches_query(f, words))
+        and (not type_filter or type_group(f.get("facility_type", "")) == type_filter)
     ]
 
 
@@ -572,6 +658,8 @@ def _load_facilities(cache_key: str, center: tuple[float, float]) -> List[Dict[s
         raise FacilityProviderError(
             f"Unknown FACILITIES_PROVIDER '{FACILITIES_PROVIDER}' (expected 'healthsites' or 'overpass')"
         )
+
+    facilities = merge_nearby_duplicates(facilities)
 
     try:
         cache.set(cache_key, facilities, CACHE_TTL)

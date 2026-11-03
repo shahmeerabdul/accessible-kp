@@ -3,18 +3,37 @@ export default {
   content: ["./index.html", "./src/**/*.{js,jsx}"],
   theme: {
     extend: {
+      // "Civic" palette: warm off-white paper, near-black ink and a single deep
+      // green accent. Every text/background pairing below meets WCAG AA.
       colors: {
-        brand: {
-          200: "#bbf7d0",
-          300: "#86efac",
-          400: "#4ade80",
-          500: "#22c55e",
-          600: "#16a34a",
-          700: "#15803d",
+        paper: "#F6F4EE",
+        surface: "#FFFFFF",
+        ink: {
+          DEFAULT: "#1C2024",
+          soft: "#4A525C",
         },
+        line: "#D6D2C8",
+        brand: {
+          DEFAULT: "#0B5D3B",
+          dark: "#08472D",
+          tint: "#E3F0E8",
+        },
+        alert: "#A4261C",
+      },
+      fontFamily: {
+        // Atkinson Hyperlegible was designed for low-vision readers. The
+        // system fonts are the fallback if the web font can't load.
+        sans: [
+          '"Atkinson Hyperlegible"',
+          "system-ui",
+          '"Segoe UI"',
+          "Roboto",
+          "Helvetica",
+          "Arial",
+          "sans-serif",
+        ],
       },
     },
   },
   plugins: [],
 };
-

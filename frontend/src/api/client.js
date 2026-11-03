@@ -11,28 +11,41 @@ export const api = axios.create({
 });
 
 /**
- * Filters are applied by the backend before the limit, so they cover every
- * facility fetched for the city, not just the first `limit`.
+ * Search facilities by city and/or by the visitor's location.
+ *
+ * Filters, text search and sorting are done by the backend before the limit,
+ * so they cover every facility fetched for the area, not just the first `limit`.
  *
  * Resolves to { facilities, total, capped }:
- *  - total:  how many facilities match the filters (may exceed facilities.length)
- *  - capped: the city hit the backend's fetch cap, so more may exist upstream
+ *  - total:  how many facilities match (may exceed facilities.length)
+ *  - capped: the area hit the backend's fetch cap, so more may exist upstream
  */
 export async function fetchFacilities({
-  city,
+  city = "",
+  coords = null,
   limit = 100,
   ownership = "",
   emergency = false,
   open24 = false,
+  wheelchair = false,
+  type = "",
+  sort = "",
+  query = "",
 }) {
   const params = new URLSearchParams();
-  params.append("city", city);
-  if (limit) {
-    params.append("limit", String(limit));
+  if (city) params.append("city", city);
+  if (coords) {
+    params.append("lat", String(coords.lat));
+    params.append("lon", String(coords.lon));
   }
+  if (limit) params.append("limit", String(limit));
   if (ownership) params.append("ownership", ownership);
   if (emergency) params.append("emergency", "true");
   if (open24) params.append("open_24_7", "true");
+  if (wheelchair) params.append("wheelchair", "true");
+  if (type) params.append("type", type);
+  if (sort) params.append("sort", sort);
+  if (query) params.append("q", query);
 
   const response = await api.get(`/api/facilities?${params.toString()}`);
   const facilities = Array.isArray(response.data) ? response.data : [];
@@ -44,4 +57,3 @@ export async function fetchFacilities({
     capped: response.headers["x-upstream-capped"] === "true",
   };
 }
-

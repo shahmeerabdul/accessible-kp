@@ -98,6 +98,7 @@ Data comes live from **OpenStreetMap** — via either the **healthsites.io** API
    | `emergency`, `open_24_7`, `wheelchair` | `true` to keep only facilities with that recorded |
    | `q` | Text search: every word must appear in the name or address (case-insensitive) |
    | `sort` | `name` (A–Z, unnamed last) or `distance` (nearest first) |
+   | `type` | `hospital`, `clinic`, `health_unit` (BHU/RHC), `pharmacy_lab` or `other` |
 
    `city` and `lat`/`lon` can be combined: the city is searched and distances are measured
    from the visitor. With `lat`/`lon` the default order is nearest first.
@@ -191,28 +192,53 @@ Data comes live from **OpenStreetMap** — via either the **healthsites.io** API
 
 ### Frontend architecture
 
-The UI is a three-pane layout: a filter rail, a results panel, and the map.
-A **Split / List / Map** toggle in the header controls which panes are shown —
+The UI is a three-pane layout: a search/filter sidebar, a results panel, and the map.
+A **List and map / List / Map** toggle in the header controls which panes are shown —
 List mode hides the map and lays results out as a multi-column grid.
 
-- **`CitySelect`** – dropdown for KPK cities (Peshawar, Mardan, Abbottabad, Mingora, Kohat, Bannu, D.I. Khan, etc.)
-- **`Filters`** – segmented ownership control (All / Govt / Private), Emergency and
-  Open 24/7 toggle pills, and the fetch limit
+**Design ("civic" style):** a warm off-white page with near-black text and a single deep
+green accent, set in [Atkinson Hyperlegible](https://fonts.google.com/specimen/Atkinson+Hyperlegible)
+(designed for low-vision readers; system fonts are the fallback). Body text is 16px or
+larger, controls are real form elements (radio buttons, checkboxes, selects), keyboard
+focus is clearly outlined, and there is a "Skip to results" link. Colours are defined once
+in `frontend/tailwind.config.js`. Colour is never the only signal: each facility type has a
+letter (H, C, B, R) on its list marker and map pin, and emergency / 24-hour status is written
+out as text.
+
+- **`CitySelect`** – dropdown of 34 KPK towns: the main town of each district (Peshawar,
+  Mardan, Abbottabad, Mingora/Swat, Kohat, Bannu, D.I. Khan, Chitral, Dir, Parachinar, Wana,
+  …). Defined once in `CITY_CENTERS` (`backend/facilities/services.py`) and mirrored in
+  `frontend/src/constants/cities.js`; a test fails if the two drift apart. Chitral and Pattan
+  also stand in for their neighbouring districts (Upper Chitral, Kolai-Palas).
+- **`LocationControl`** – "Use my location" button (the browser asks for permission only
+  when it is clicked). The position is rounded to ~110 m before it is sent, shown on the map
+  as "You are here", and can be switched off again. Browsers only allow this on HTTPS (or
+  localhost).
+- **`SearchBox`** – search by name or address, debounced so it does not request on every key
+- **`Filters`** – type of facility, sort order (default / name / nearest), ownership radio
+  buttons, "Has emergency services", "Open 24 hours" and "Wheelchair accessible" checkboxes,
+  how many results to show, and "Clear all filters". On small screens this panel folds into a
+  "Show filters" button so results are not pushed off-screen
 - **`FacilityList`** – cards showing:
-  - name, facility type, address
-  - facility-type, ownership, emergency and 24/7 badges
+  - name, facility type, ownership and address
+  - distance ("0.9 km from you", or from the city centre when sorting by distance)
+  - "Emergency services" / "Open 24 hours" / wheelchair access as plain text when known
   - a contact row: tap-to-call phone, website and email when present, plus a
-    **Directions** link (available for every facility, since it only needs coordinates)
-- **`MapView`** – Leaflet map with markers colour-coded by facility type and a matching
-  legend. Auto-fits bounds to the current results, flies to the selected facility, and
-  calls `invalidateSize()` on container resize so the view toggle doesn't leave grey tiles.
-- **`Pagination`** – page numbers plus prev/next, showing the current range
+    **Directions** link (available for every facility, since it only needs coordinates) and
+    a **Show on map** button
+- **`MapView`** – Leaflet map (standard OpenStreetMap tiles, desaturated with CSS) with
+  letter-marked pins and a matching key. Auto-fits bounds to the current results, flies to
+  the selected facility, and calls `invalidateSize()` on container resize so the view
+  toggle doesn't leave grey tiles.
+- **`Pagination`** – Previous / Next and page numbers, showing the current range
 
 The root `App` component:
 
-- Manages selected city, filters, result limit, view mode, pagination and selection
-- Calls `GET /api/facilities` via Axios with `city`, `limit` and the active filters
-  (filtering happens on the server, before the limit)
+- Manages selected city, the visitor's location, search text, filters, result limit, view
+  mode, pagination and selection
+- Calls `GET /api/facilities` via Axios with `city` and/or `lat`/`lon`, `limit`, the search
+  text and the active filters (filtering, search and sorting happen on the server, before
+  the limit)
 - Handles **loading** (skeletons), **error**, and **empty** states
 - Shows a notice when results are cut off (more matches than the limit, or the city hit
   the 500-facility fetch cap)
@@ -250,7 +276,10 @@ flies the map to that facility with an enlarged marker.
       otherwise left empty rather than guessed
     - `lat`, `lon`
   - Wraps low-level/network errors into a custom `FacilityProviderError`
-  - De-duplicates facilities by `osm_id` and provides `filter_facilities`
+  - De-duplicates facilities by `osm_id`, and merges records that are the same place mapped
+    twice (same name within 150 m, keeping the most complete one)
+  - Treats names that are only numbers or punctuation (e.g. "82") as unnamed
+  - Provides `filter_facilities`, text search, sorting, distance and the near-me grid snapping
   - Uses Django cache (`LocMemCache`) keyed by `(provider, city)` so switching
     providers doesn't serve stale results from the other one
 
@@ -331,12 +360,13 @@ setup, including nginx and systemd examples, the production settings, and TLS.
 - REST endpoint: `GET /api/facilities` by city or by location, with filters, text search and sorting
 - Basic in‑memory caching via Django cache framework (`LocMemCache`)
 - React SPA with:
-  - responsive layout (mobile + desktop) with Split / List / Map view modes
+  - responsive layout (mobile + desktop) with List-and-map / List / Map view modes
   - cards list + interactive Leaflet map, linked by a shared selection
   - client-side pagination at 20 per page
-  - server-side filters for ownership, emergency, 24/7, plus a notice when results are cut off
+  - "Use my location" near-me search, name/address search, sorting, and server-side filters
+    (type, ownership, emergency, 24/7, wheelchair), plus a notice when results are cut off
   - contact details (phone / website / email) plus Directions for every facility
-  - colour-coded map markers with a legend, auto-fitted to results
+  - letter-marked map pins with a key, auto-fitted to results
   - loading skeletons, empty, and error states
 - Env‑driven configuration for both backend and frontend
 
